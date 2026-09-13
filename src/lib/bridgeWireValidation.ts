@@ -298,7 +298,8 @@ function isSessionSummary(value: unknown): boolean {
     Array.isArray(value.features) &&
     value.features.every(isBridgeFeature) &&
     hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt']) &&
-    (value.interruptReason === undefined || typeof value.interruptReason === 'string')
+    (value.interruptReason === undefined || typeof value.interruptReason === 'string') &&
+    (value.resumeId === undefined || typeof value.resumeId === 'string')
   );
 }
 

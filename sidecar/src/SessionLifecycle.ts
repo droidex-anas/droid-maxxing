@@ -121,6 +121,10 @@ export interface SessionLifecycleDependencies {
   applyPendingSessionSettings: (appSessionId: string) => Promise<boolean>;
   runPrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<void>;
   context: Pick<SessionContext, 'refresh' | 'stopPolling' | 'stopSession' | 'forgetSession'>;
+  // Durable transcript for a provider that keeps no session file of its own.
+  // Opened with the live session, released when it closes.
+  openProviderTranscript: (summary: SessionSummary) => void;
+  forgetProviderTranscript: (appSessionId: string) => void;
   forgetInteractions: (appSessionId: string) => void;
   forgetEventFlow: (appSessionId: string) => void;
   forgetMissionControl: (appSessionId: string) => void;
@@ -219,6 +223,8 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
+      // Registered first, so the failed-open path that unregisters also releases it.
+      d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
@@ -319,6 +325,8 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
+      // Registered first, so the failed-open path that unregisters also releases it.
+      d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({
@@ -559,6 +567,11 @@ export class SessionLifecycle {
       await run(() => {
         d.forgetPendingSettings(liveSession.summary.appSessionId);
       });
+      // Flushes the open stored message, so the file is complete before the
+      // renderer hears the session closed.
+      await run(() => {
+        d.forgetProviderTranscript(liveSession.summary.appSessionId);
+      });
       d.emit({ type: 'session.closed', appSessionId: liveSession.summary.appSessionId });
       await run(() => {
         d.forgetInteractions(liveSession.summary.appSessionId);
@@ -728,6 +741,7 @@ export class SessionLifecycle {
       if (this.dependencies.registry.unregister(liveSession.summary.appSessionId)) {
         this.dependencies.forgetInteractions(liveSession.summary.appSessionId);
         this.dependencies.forgetEventFlow(liveSession.summary.appSessionId);
+        this.dependencies.forgetProviderTranscript(liveSession.summary.appSessionId);
         this.dependencies.forgetMissionControl(liveSession.summary.appSessionId);
         this.dependencies.forgetPendingSettings(liveSession.summary.appSessionId);
       }

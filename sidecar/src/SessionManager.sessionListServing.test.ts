@@ -305,10 +305,12 @@ test('provider replacement finalizes the retired file without treating its alias
   }
 });
 
-test('the watcher starts once per boot, not per sessions.list command', async () => {
+test('watchers start once per boot, not per sessions.list command', async () => {
+  const roots = new Set<string | undefined>();
   let starts = 0;
   const ctx = createSessionManagerTestContext({
-    startSessionFileWatcher: () => {
+    startSessionFileWatcher: (options) => {
+      roots.add(options.root);
       starts += 1;
       return { consumeLiveSessionFile: () => undefined, close: () => {} };
     },
@@ -317,7 +319,9 @@ test('the watcher starts once per boot, not per sessions.list command', async ()
     await ctx.handle({ type: 'sessions.list' });
     await ctx.handle({ type: 'sessions.list' });
     await ctx.handle({ type: 'sessions.list' });
-    assert.equal(starts, 1);
+    // One per scanned session-file root: Droid's tree and the provider transcripts.
+    assert.equal(starts, 2);
+    assert.equal(roots.size, 2);
   } finally {
     await ctx.dispose();
   }

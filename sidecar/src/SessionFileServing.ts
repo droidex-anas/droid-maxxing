@@ -1,3 +1,4 @@
+import { providerSessionsDir } from './droidexPaths.js';
 import type { SessionFileChange } from './sessionFileCache.js';
 import type { SessionListFilterOptions, SessionListPage } from './sessionListFilter.js';
 import type { SessionFileWatcher, SessionFileWatcherOptions } from './sessionFileWatcher.js';
@@ -26,7 +27,9 @@ export class SessionFileServing {
   private bootReconciled = false;
   private bootChanges: Map<string, SessionFileChange> | null = new Map();
   private reconcileTail: Promise<void> = Promise.resolve();
-  private watcher: SessionFileWatcher | null = null;
+  // One watcher per scanned session-file root (Droid's own tree, and the
+  // transcripts DROIDEX writes for the other providers).
+  private watchers: SessionFileWatcher[] = [];
   private lastListOptions?: SessionListFilterOptions;
 
   constructor(private readonly dependencies: SessionFileServingDependencies) {}
@@ -54,8 +57,8 @@ export class SessionFileServing {
   }
 
   finalizeReplacedProvider(providerSessionId: string): void {
-    if (this.dependencies.isShutdownStarted() || !this.watcher) return;
-    const path = this.watcher.consumeLiveSessionFile(providerSessionId);
+    if (this.dependencies.isShutdownStarted() || this.watchers.length === 0) return;
+    const path = this.consumeLiveSessionFile(providerSessionId);
     const changes = path ? [{ providerSessionId, path }] : null;
     const reconcile = this.queueReconcile(() => this.reconcileExternal(changes));
     void reconcile.catch((error: unknown) => {
@@ -66,18 +69,27 @@ export class SessionFileServing {
 
   async finalizeClosedProvider(providerSessionId: string): Promise<void> {
     if (this.dependencies.isShutdownStarted()) return;
-    const path = this.watcher?.consumeLiveSessionFile(providerSessionId);
+    const path = this.consumeLiveSessionFile(providerSessionId);
     const changes = path ? [{ providerSessionId, path }] : null;
     await this.queueReconcile(() => this.reconcileExternal(changes));
   }
 
   async close(): Promise<void> {
-    this.watcher?.close();
+    for (const watcher of this.watchers) watcher.close();
     await this.reconcileTail;
   }
 
   watcherCount(): number {
-    return this.watcher ? 1 : 0;
+    return this.watchers.length;
+  }
+
+  // The session whose file was just finalized lives under exactly one root.
+  private consumeLiveSessionFile(providerSessionId: string): string | undefined {
+    for (const watcher of this.watchers) {
+      const path = watcher.consumeLiveSessionFile(providerSessionId);
+      if (path) return path;
+    }
+    return undefined;
   }
 
   private emit(options?: SessionListFilterOptions): void {
@@ -87,21 +99,27 @@ export class SessionFileServing {
   private bootstrap(): void {
     if (!this.bootstrapDone) {
       this.bootstrapDone = true;
-      this.watcher = this.dependencies.startWatcher({
-        isLiveSession: this.dependencies.isLiveSession,
-        onExternalChange: (changes) => {
-          if (this.dependencies.isShutdownStarted()) return;
-          if (!this.bootReconciled) {
-            this.rememberBootChanges(changes);
-            return;
-          }
-          const reconcile = this.queueReconcile(() => this.reconcileExternal(changes));
-          void reconcile.catch((error: unknown) => {
-            this.markCacheStale();
-            console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-          });
-        },
-      });
+      const watch = (root?: string): void => {
+        const watcher = this.dependencies.startWatcher({
+          ...(root !== undefined ? { root } : {}),
+          isLiveSession: this.dependencies.isLiveSession,
+          onExternalChange: (changes) => {
+            if (this.dependencies.isShutdownStarted()) return;
+            if (!this.bootReconciled) {
+              this.rememberBootChanges(changes);
+              return;
+            }
+            const reconcile = this.queueReconcile(() => this.reconcileExternal(changes));
+            void reconcile.catch((error: unknown) => {
+              this.markCacheStale();
+              console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
+            });
+          },
+        });
+        if (watcher) this.watchers.push(watcher);
+      };
+      watch();
+      watch(providerSessionsDir());
     }
     if (this.bootReconciled || this.bootReconcile) return;
 

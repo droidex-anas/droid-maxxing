@@ -265,6 +265,8 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
         });
       },
     },
+    openProviderTranscript: () => {},
+    forgetProviderTranscript: () => {},
     forgetInteractions: (appSessionId) => {
       forgettingAfterUnregister.push(registry.getLive(appSessionId) === undefined);
       calls.push({ target: 'cleanup', method: 'interactions.forget', args: [appSessionId] });

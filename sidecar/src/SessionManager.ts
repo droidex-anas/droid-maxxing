@@ -106,7 +106,8 @@ import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfigur
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
-import { assertProviderUnchanged } from './providers/providerKind.js';
+import { assertProviderUnchanged, DEFAULT_PROVIDER } from './providers/providerKind.js';
+import { ProviderTranscriptFile } from './providers/ProviderTranscriptFile.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -509,6 +510,12 @@ export class SessionManager {
       },
       forgetEventFlow: (appSessionId) => {
         this.eventFlow.forgetSession(appSessionId);
+      },
+      openProviderTranscript: (summary) => {
+        this.openProviderTranscript(summary);
+      },
+      forgetProviderTranscript: (appSessionId) => {
+        this.timeline.releaseTranscript(appSessionId);
       },
       forgetMissionControl: (appSessionId) => {
         this.missionControlPolicy.forget(appSessionId);
@@ -1247,11 +1254,27 @@ export class SessionManager {
     }
   }
 
+  // Droid keeps its own session file under ~/.factory/sessions; a session on any
+  // other provider is invisible in the sidebar and empty after a restart unless
+  // DROIDEX writes one for it.
+  private openProviderTranscript(summary: SessionSummary): void {
+    if (summary.provider === DEFAULT_PROVIDER) return;
+    const appSessionId = summary.appSessionId;
+    this.timeline.useTranscript(
+      appSessionId,
+      new ProviderTranscriptFile(
+        appSessionId,
+        () => this.registry.getLive(appSessionId)?.summary ?? summary,
+      ),
+    );
+  }
+
   private async runPrimaryTurn(liveSession: LiveSession, prompt: string): Promise<void> {
     const appSessionId = liveSession.summary.appSessionId;
     const contextTarget = this.primaryContextTarget(liveSession);
     if (!this.isCurrentPrimarySession(liveSession)) return;
     this.eventFlow.beginTurn(appSessionId, appSessionId);
+    this.timeline.recordPrompt(appSessionId, prompt);
     this.context.beginTurn(appSessionId);
     this.context.startPolling(contextTarget);
     let turnError: unknown;

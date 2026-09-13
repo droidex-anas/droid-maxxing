@@ -87,6 +87,7 @@ function hasOptionalSummaryFields(summary: Record<string, unknown>): boolean {
   return (
     optionalString(summary, [
       'providerSessionId',
+      'resumeId',
       'missionId',
       'modelId',
       'compactionModel',
