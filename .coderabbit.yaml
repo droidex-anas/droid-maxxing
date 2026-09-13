@@ -1,0 +1,6 @@
+# Stacked PRs target the providers integration branch, not main. Review those too.
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - providers/.*
