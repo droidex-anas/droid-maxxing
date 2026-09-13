@@ -1,20 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Terminal } from '@xterm/xterm';
-import type { FitAddon } from '@xterm/addon-fit';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
 import { Copy } from '@droidex/icons';
 import '@xterm/xterm/css/xterm.css';
-import {
-  resizeTerminal,
-  subscribeTerminal,
-  unsubscribeTerminal,
-  type TerminalDataChannel,
-} from '../../lib/desktop';
-import { createTerminalOutputPump } from '../../lib/terminalOutputPump';
-import { closeTerminalForTab, ensureTerminalForTab } from '../../lib/terminal';
+import { acquireTerminalInstance, type TerminalInstance } from '../../lib/terminalInstances';
+import { HoverTooltip } from '../HoverTooltip';
+import { TerminalCloseConfirm } from './TerminalCloseConfirm';
 import { useStoreSelector } from '../../hooks/useStore';
 import type { ThemeConfig } from '../../hooks/persistedThemePreferences';
-import { isTerminalTabShortcut } from '../../lib/keyboardShortcuts';
 
 export function TerminalWorkspace({
   tabId,
@@ -22,264 +14,221 @@ export function TerminalWorkspace({
   appSessionId,
   cwd,
   onCreated,
+  confirmClose = false,
+  onKeepOpen,
+  onStopAndClose,
 }: {
   tabId: string;
   terminalId?: string;
   appSessionId: string;
   cwd: string;
   onCreated: (terminalId: string, label: string) => void;
+  confirmClose?: boolean;
+  onKeepOpen?: () => void;
+  onStopAndClose?: () => void;
 }) {
   const theme = useStoreSelector((state) => state.theme);
   const hostRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const terminalIdRef = useRef(terminalId);
-  const onCreatedRef = useRef(onCreated);
-  const themeRef = useRef(theme);
-  const lastSizeRef = useRef({ cols: 0, rows: 0 });
-  const [status, setStatus] = useState<'starting' | 'running' | 'exited' | 'error'>(
-    terminalId ? 'running' : 'starting',
+  const instanceRef = useRef<TerminalInstance | null>(null);
+  instanceRef.current ??= acquireTerminalInstance(tabId, { appSessionId, cwd, terminalId });
+  const instance = instanceRef.current;
+  const state = useSyncExternalStore(
+    (listener) => instance.subscribe(listener),
+    () => instance.getState(),
+    () => instance.getState(),
   );
-  const [error, setError] = useState('');
-  const [truncated, setTruncated] = useState(false);
+  const onCreatedRef = useRef(onCreated);
+  onCreatedRef.current = onCreated;
+  // A tab that arms its close confirmation by being activated (see App.tsx's
+  // onCloseTab) mounts this component with `confirmClose` already true, in
+  // the same commit as the confirmation dialog's autoFocus on Keep. Reading
+  // `confirmClose` here (rather than via a prop passed to the effect)
+  // captures only its value from this initial render — the attach effect
+  // below runs once, on mount — so the terminal doesn't steal focus back
+  // from Keep right after the dialog claims it.
+  const focusOnAttachRef = useRef(!confirmClose);
 
   useEffect(() => {
-    terminalIdRef.current = terminalId;
-  }, [terminalId]);
-
-  useEffect(() => {
-    onCreatedRef.current = onCreated;
-  }, [onCreated]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const isDisposed = () => cancelled;
-    let resizeFrame = 0;
-    let unlisten: () => void = () => {
-      /* no-op */
-    };
-    let observer: ResizeObserver | null = null;
-    let visibility: (() => void) | null = null;
-    let channel: TerminalDataChannel | null = null;
-    let pump: ReturnType<typeof createTerminalOutputPump> | null = null;
-
-    void Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')])
-      .then(async ([xterm, fit]) => {
-        if (isDisposed() || !hostRef.current) return;
-        const instance = new xterm.Terminal({
-          cursorBlink: true,
-          cursorStyle: 'bar',
-          fontFamily:
-            '"SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-          fontSize: 12,
-          lineHeight: 1.25,
-          scrollback: 5_000,
-          smoothScrollDuration: 90,
-          allowProposedApi: false,
-          theme: terminalTheme(themeRef.current),
-        });
-        const fitAddon = new fit.FitAddon();
-        instance.loadAddon(fitAddon);
-        instance.attachCustomKeyEventHandler((event) => {
-          if (!isTerminalTabShortcut(event)) return true;
-          event.preventDefault();
-          event.stopPropagation();
-          return false;
-        });
-        instance.open(hostRef.current);
-        terminalRef.current = instance;
-        fitRef.current = fitAddon;
-
-        const hostIsHidden = () => {
-          if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
-          const host = hostRef.current;
-          if (!host) return true;
-          return host.clientWidth < 8 || host.clientHeight < 8;
-        };
-        pump = createTerminalOutputPump({
-          write: (data) => {
-            instance.write(data);
-          },
-          isHidden: hostIsHidden,
-          scheduleFrame: (callback) => requestAnimationFrame(callback),
-          cancelFrame: (id) => {
-            cancelAnimationFrame(id);
-          },
-        });
-        const onVisibility = () => {
-          pump?.reveal();
-        };
-        document.addEventListener('visibilitychange', onVisibility);
-        visibility = () => {
-          document.removeEventListener('visibilitychange', onVisibility);
-        };
-
-        const applyFit = () => {
-          resizeFrame = 0;
-          if (isDisposed() || !hostRef.current || hostRef.current.clientWidth < 8) return;
-          fitAddon.fit();
-          pump?.reveal();
-          const next = { cols: instance.cols, rows: instance.rows };
-          if (
-            terminalIdRef.current &&
-            (next.cols !== lastSizeRef.current.cols || next.rows !== lastSizeRef.current.rows)
-          ) {
-            lastSizeRef.current = next;
-            void resizeTerminal(terminalIdRef.current, next.cols, next.rows);
-          }
-        };
-        const scheduleFit = () => {
-          if (!resizeFrame) resizeFrame = requestAnimationFrame(applyFit);
-        };
-        observer = new ResizeObserver(scheduleFit);
-        observer.observe(hostRef.current);
-        applyFit();
-
-        const requestedTerminalId = terminalIdRef.current;
-        const info = await ensureTerminalForTab(tabId, requestedTerminalId, {
-          appSessionId,
-          cwd,
-          cols: instance.cols,
-          rows: instance.rows,
-        });
-        if (isDisposed()) {
-          if (info.id !== requestedTerminalId) {
-            await closeTerminalForTab(tabId, info.id);
-          }
-          return;
-        }
-        terminalIdRef.current = info.id;
-        setStatus('running');
-        const shellName = info.shell.split(/[\\/]/).pop() ?? 'Terminal';
-        onCreatedRef.current(info.id, shellName);
-
-        channel = subscribeTerminal(info.id);
-        if (!channel) {
-          setStatus('error');
-          setError('Terminal is only available in the desktop app.');
-          return;
-        }
-        unlisten = channel.onEvent((event) => {
-          if (event.kind === 'data' || event.kind === 'replay') {
-            if (event.truncated) setTruncated(true);
-            pump?.push(event.data);
-            return;
-          }
-          if (event.kind === 'error') {
-            setStatus('error');
-            setError(event.message);
-            return;
-          }
-          setStatus(event.exitCode === 0 ? 'exited' : 'error');
-          if (event.exitCode !== 0) {
-            setError(`Shell exited with code ${String(event.exitCode ?? 'unknown')}.`);
-          }
-        });
-        if (isDisposed()) {
-          channel.close();
-          await unsubscribeTerminal(info.id);
-          return;
-        }
-        instance.onData((data) => {
-          channel?.postInput(data);
-        });
-        instance.focus();
-      })
-      .catch((reason: unknown) => {
-        if (isDisposed()) return;
-        setStatus('error');
-        setError(reason instanceof Error ? reason.message : String(reason));
-      });
-
+    const host = hostRef.current;
+    if (!host) return;
+    instance.attach(host, { focus: focusOnAttachRef.current });
+    const observer = new ResizeObserver(() => {
+      instance.fit();
+    });
+    observer.observe(host);
     return () => {
-      cancelled = true;
-      if (resizeFrame) cancelAnimationFrame(resizeFrame);
-      observer?.disconnect();
-      visibility?.();
-      unlisten();
-      pump?.dispose();
-      channel?.close();
-      if (terminalIdRef.current) void unsubscribeTerminal(terminalIdRef.current);
-      terminalRef.current?.dispose();
-      terminalRef.current = null;
-      fitRef.current = null;
+      observer.disconnect();
+      instance.detach();
     };
-  }, [cwd, appSessionId, tabId]);
+  }, [instance]);
 
   useEffect(() => {
-    themeRef.current = theme;
-    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(theme);
-  }, [theme]);
+    instance.setTheme(terminalTheme(theme));
+  }, [instance, theme]);
+
+  useEffect(() => {
+    if (state.terminalId && state.terminalId !== terminalId) {
+      onCreatedRef.current(state.terminalId, state.shellName);
+    }
+  }, [state.terminalId, state.shellName, terminalId]);
+
+  const stopped = state.status === 'exited' || state.status === 'error';
+  const restart = () => {
+    instance.focus();
+    void instance.restart();
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-droid-bg">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-2.5">
-        <span
-          title={cwd}
-          className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted"
-        >
-          {cwd}
-        </span>
-        <TerminalButton
-          title="Copy selection"
+      <TerminalHeader shellName={state.shellName} cwd={cwd} stopped={stopped}>
+        <HeaderAction
+          label="Copy selection"
           onClick={() => {
-            const selection = terminalRef.current?.getSelection();
-            if (selection) void navigator.clipboard.writeText(selection);
+            const selection = instance.copySelection();
+            if (selection) {
+              navigator.clipboard.writeText(selection).catch((error: unknown) => {
+                console.warn('Copy failed', error);
+              });
+            }
           }}
         >
-          <Copy className="h-3.5 w-3.5" />
-        </TerminalButton>
-        <TerminalButton title="Clear terminal" onClick={() => terminalRef.current?.clear()}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </TerminalButton>
-        <TerminalButton title="Reset terminal display" onClick={() => terminalRef.current?.reset()}>
-          <RotateCcw className="h-3.5 w-3.5" />
-        </TerminalButton>
-      </div>
-      {(status !== 'running' || truncated) && (
-        <div
-          className={`shrink-0 border-b border-droid-border px-3 py-2 text-[12px] ${
-            status === 'error'
-              ? 'bg-droid-red/10 text-droid-red'
-              : 'bg-droid-surface text-droid-text-muted'
-          }`}
-        >
-          {terminalStatusCopy(status, cwd, error)}
+          <Copy className="h-4 w-4" />
+        </HeaderAction>
+        {!stopped && (
+          <>
+            <HeaderAction
+              label="Clear"
+              onClick={() => {
+                instance.clear();
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </HeaderAction>
+            <HeaderAction
+              label="Reset"
+              onClick={() => {
+                instance.reset();
+              }}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </HeaderAction>
+          </>
+        )}
+      </TerminalHeader>
+      {stopped && (
+        <TerminalStatusRow
+          message={state.status === 'error' ? state.error || 'Shell failed' : 'Shell exited'}
+          tone={state.status === 'error' ? 'error' : 'muted'}
+          onRestart={restart}
+        />
+      )}
+      {state.status === 'running' && state.truncated && (
+        <div className="shrink-0 animate-fade-in px-3 pb-0.5 pt-1.5 text-[12px] leading-none text-droid-text-muted">
+          Earlier output was trimmed
         </div>
       )}
-      <div ref={hostRef} data-terminal-input className="min-h-0 flex-1 overflow-hidden p-2" />
+      <div className="relative min-h-0 flex-1">
+        <div ref={hostRef} className="h-full w-full overflow-hidden p-3" />
+        {state.status === 'starting' && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-droid-text-muted">
+            {state.shellName === 'Terminal' ? 'Starting shell…' : `Starting ${state.shellName}…`}
+          </div>
+        )}
+        {confirmClose && (
+          <TerminalCloseConfirm
+            onKeepOpen={() => {
+              // Keep/Escape dismiss the dialog and leave focus on
+              // `document.body`; without this the user has to click the
+              // terminal again before they can type.
+              instance.focus();
+              onKeepOpen?.();
+            }}
+            onStopAndClose={() => onStopAndClose?.()}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function terminalStatusCopy(
-  status: 'starting' | 'running' | 'exited' | 'error',
-  cwd: string,
-  error: string,
-): string {
-  if (status === 'starting') return `Starting shell in ${cwd}…`;
-  if (status === 'running') return 'Earlier output was truncated.';
-  return error || 'Terminal process exited.';
+function TerminalHeader({
+  shellName,
+  cwd,
+  stopped,
+  children,
+}: {
+  shellName: string;
+  cwd: string;
+  stopped: boolean;
+  children: ReactNode;
+}) {
+  const folder = cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
+  return (
+    <div className="group flex h-8 shrink-0 items-center gap-0.5 border-b border-droid-border pl-3 pr-1.5">
+      <div className="flex min-w-0 flex-1 items-center">
+        <HoverTooltip label={cwd} placement="bottom" className="min-w-0">
+          <span
+            className={`truncate text-[12px] leading-none ${stopped ? 'text-droid-text-secondary' : 'text-droid-text'}`}
+          >
+            {shellName}
+            <span className="text-droid-text-secondary"> · {folder}</span>
+          </span>
+        </HoverTooltip>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+        {children}
+      </div>
+    </div>
+  );
 }
 
-function TerminalButton({
-  title,
+function TerminalStatusRow({
+  message,
+  tone,
+  onRestart,
+}: {
+  message: string;
+  tone: 'muted' | 'error';
+  onRestart: () => void;
+}) {
+  return (
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-droid-border pl-3 pr-1.5 text-[12px]">
+      <span
+        className={`min-w-0 flex-1 truncate ${tone === 'error' ? 'text-droid-red' : 'text-droid-text-secondary'}`}
+      >
+        {message}
+      </span>
+      <button
+        type="button"
+        onClick={onRestart}
+        className="shrink-0 rounded-md px-2 py-1 leading-none text-droid-text transition-colors hover:bg-droid-elevated focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+      >
+        Restart
+      </button>
+    </div>
+  );
+}
+
+function HeaderAction({
+  label,
   onClick,
   children,
 }: {
-  title: string;
+  label: string;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-lg text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
-    >
-      {children}
-    </button>
+    <HoverTooltip label={label} placement="bottom">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+      >
+        {children}
+      </button>
+    </HoverTooltip>
   );
 }
 

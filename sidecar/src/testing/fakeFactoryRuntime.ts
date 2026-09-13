@@ -416,6 +416,9 @@ export class FakeFactoryRuntime implements FactoryRuntime {
   readonly sessions = new Map<string, FakeFactorySession>();
   readonly contextBreakdowns = new Map<string, unknown>();
   readonly contextBreakdownErrors = new Map<string, Error>();
+  // Provider process ids by session id, so tests can give a fake session the
+  // root pid the agent-process monitor tracks.
+  readonly processIds = new Map<string, number>();
   private readonly loadGates: DeferredStream[] = [];
   private readonly loadWaiters: { sessionId: string; resolve(): void }[] = [];
   private apiKey = '';
@@ -435,6 +438,14 @@ export class FakeFactoryRuntime implements FactoryRuntime {
     const error = this.contextBreakdownErrors.get(session.sessionId);
     if (error) return Promise.reject(error);
     return Promise.resolve(this.contextBreakdowns.get(session.sessionId));
+  }
+
+  processIdOf(session: FactorySession): number | undefined {
+    return this.processIds.get(session.sessionId);
+  }
+
+  isProcessAlive(session: FactorySession): boolean {
+    return this.processIdOf(session) !== undefined;
   }
 
   createSession(options: CreateRuntimeSessionOptions): Promise<FakeFactorySession> {

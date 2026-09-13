@@ -77,6 +77,7 @@ export interface SessionManagerTestContext {
     command: Omit<Extract<Protocol.ClientCommand, { type: 'session.create' }>, 'type'>,
   ): Promise<void>;
   retireIdleSessionRuntimes(): Promise<void>;
+  scanAgentProcesses(): Promise<void>;
   shutdown(): Promise<void>;
   waitForIdle(): Promise<void>;
   dispose(): Promise<void>;
@@ -96,6 +97,7 @@ export function createSessionManagerTestContext(
     streamingCoalesceMs?: number;
     childRuntimeIdleMs?: number;
     sessionRuntimeIdleMs?: number;
+    agentProcessHost?: SessionManagerDependencies['agentProcessHost'];
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -142,6 +144,7 @@ export function createSessionManagerTestContext(
     // Integration assertions read appended events synchronously; the timer
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
+    ...(options.agentProcessHost ? { agentProcessHost: options.agentProcessHost } : {}),
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
     ...(options.startSessionFileWatcher
       ? { startSessionFileWatcher: options.startSessionFileWatcher }
@@ -254,6 +257,7 @@ export function createSessionManagerTestContext(
     handle,
     create: (command) => handle({ type: 'session.create', ...command }),
     retireIdleSessionRuntimes: () => manager.retireIdleSessionRuntimes(),
+    scanAgentProcesses: () => manager.scanAgentProcesses(),
     shutdown: () => manager.shutdown(),
     waitForIdle: () => new Promise((resolve) => setImmediate(resolve)),
     dispose: async () => {

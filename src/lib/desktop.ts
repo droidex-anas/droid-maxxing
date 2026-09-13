@@ -284,6 +284,7 @@ interface DroidControlApi {
   }) => Promise<TerminalSessionInfo>;
   terminalResize: (id: string, cols: number, rows: number) => Promise<void>;
   terminalKill: (id: string) => Promise<void>;
+  terminalHasChildren: (id: string) => Promise<boolean>;
   terminalList: (appSessionId: string) => Promise<TerminalSessionInfo[]>;
   terminalSubscribe: (id: string) => TerminalDataChannel;
   terminalUnsubscribe: (id: string) => Promise<void>;
@@ -558,6 +559,12 @@ export async function killTerminal(id: string): Promise<void> {
   const api = desktopApi();
   if (!api) return;
   await api.terminalKill(id);
+}
+
+export async function terminalHasChildren(id: string): Promise<boolean> {
+  const api = desktopApi();
+  if (!api) return false;
+  return api.terminalHasChildren(id);
 }
 
 export async function listTerminals(appSessionId: string): Promise<TerminalSessionInfo[]> {

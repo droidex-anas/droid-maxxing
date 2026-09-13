@@ -142,7 +142,7 @@ export class Bridge {
     this.lastGeneration ??= batch.generation;
     if (batch.lastSeq <= this.lastSeq) return;
     if (batch.firstSeq > this.lastSeq + 1 && this.lastSeq !== 0) {
-      this.ws?.close(1012, 'bridge event sequence gap');
+      this.ws?.close(4012, 'bridge event sequence gap');
       return;
     }
 
@@ -189,7 +189,7 @@ export class Bridge {
         recoverable: true,
       },
     ]);
-    ws.close(1002, 'malformed bridge message');
+    ws.close(4002, 'malformed bridge message');
   }
 
   private publishEvents(events: readonly ServerEvent[]): void {
@@ -259,6 +259,10 @@ function eventsFromSnapshot(message: BridgeSnapshotMessage): ServerEvent[] {
     {
       type: 'runtime.updated',
       status: message.snapshot.runtime,
+    },
+    {
+      type: 'sessions.processes',
+      processes: message.snapshot.processes,
     },
   ];
   for (const session of message.snapshot.sessions) {

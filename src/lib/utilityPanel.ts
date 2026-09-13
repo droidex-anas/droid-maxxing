@@ -124,6 +124,14 @@ export function removeUtilityTool(
   return tab ? closeUtilityTab(current, tab.id) : current;
 }
 
+export function removeSessionPanel(
+  panels: Record<string, UtilityPanelState>,
+  appSessionId: string,
+): Record<string, UtilityPanelState> {
+  if (!(appSessionId in panels)) return panels;
+  return Object.fromEntries(Object.entries(panels).filter(([id]) => id !== appSessionId));
+}
+
 export function sanitizeUtilityPanels(value: unknown): Record<string, UtilityPanelState> {
   if (!isRecord(value)) return {};
   const panels: Record<string, UtilityPanelState> = {};

@@ -178,6 +178,20 @@ export function openChildHistory(
     });
 }
 
+// Child runtimes are tracked under their parent, so closing the parent takes
+// whatever they spawned with it.
+function trackChildProcess(
+  host: ChildRuntimeInstallHost,
+  parentAppSessionId: string,
+  loaded: FactorySession,
+): void {
+  const childPid = host.d.runtime.processIdOf(loaded);
+  if (childPid !== undefined)
+    host.d.agentProcesses.track(parentAppSessionId, childPid, () =>
+      host.d.runtime.isProcessAlive(loaded),
+    );
+}
+
 export async function installChildRuntime(input: {
   parent: ParentChildSessions;
   child: ChildSessionState;
@@ -296,6 +310,12 @@ async function bindLoadedChildRuntime(input: {
   };
   child.runtime = runtime;
   attempt.provisionalSession = undefined;
+  // Tracked at the install point, not at load: every abandonment path above
+  // (supersession, cancellation, a throw) closes the provisional session
+  // without an untrack, so a root tracked earlier would never be released.
+  // `closeRuntime` is the one owner of the untrack, and it only sees runtimes
+  // that reached here.
+  trackChildProcess(host, identity.parentAppSessionId, loaded);
   child.queued = false;
   child.queuedRequestId = undefined;
   child.modelId = settings.modelId;

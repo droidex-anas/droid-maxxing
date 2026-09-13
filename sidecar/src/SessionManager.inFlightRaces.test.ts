@@ -68,7 +68,12 @@ test('shutdown admission immediately suppresses a queued primary stream failure'
     await h.waitForIdle();
 
     assert.deepEqual(
-      h.events.slice(eventsAtShutdownAdmission).map((event) => event.type),
+      h.events
+        .slice(eventsAtShutdownAdmission)
+        .map((event) => event.type)
+        // The process monitor's first publication for a tracked root is not a
+        // sidebar list; it is what this assertion is about.
+        .filter((type) => type !== 'session.processes'),
       ['session.closed'],
       'shutdown closes the session without publishing another sidebar list',
     );

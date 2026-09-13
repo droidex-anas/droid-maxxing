@@ -9,6 +9,7 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSessionsDependencies } from './ChildSessionsTypes.js';
 import type { ChildParentLease } from './ChildSessionState.js';
+import type { FactorySession } from './DroidRuntime.js';
 import type { PersistedChildSession } from './history.js';
 import type {
   AutoCompactionSettlement,
@@ -47,9 +48,11 @@ function createHarness(
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
     failFlushStreamingOnce?: boolean;
     failSettleStreamingOnce?: boolean;
+    failResolveLimitOnce?: boolean;
     missReplayChildOnce?: boolean;
     deferDurabilityForStatus?: PersistedChildSession['status'];
     childRuntimeIdleMs?: number;
+    adoptDescendants?: (isCurrent: () => boolean) => Promise<boolean>;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
@@ -62,6 +65,7 @@ function createHarness(
   let failDriveSetup = options.failDriveSetup;
   let failFlushStreaming = options.failFlushStreamingOnce;
   let failSettleStreaming = options.failSettleStreamingOnce;
+  let failResolveLimit = options.failResolveLimitOnce;
   let deferDurabilityForStatus = options.deferDurabilityForStatus;
   let clock = 100;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
@@ -83,6 +87,18 @@ function createHarness(
   let parent = parentLease(parentId, calls);
   const dependencies: ChildSessionsDependencies = {
     runtime,
+    agentProcesses: {
+      track: (appSessionId, pid) => {
+        calls.push({ target: 'runtime', method: 'processes.track', args: [appSessionId, pid] });
+      },
+      untrack: (pid) => {
+        calls.push({ target: 'cleanup', method: 'processes.untrack', args: [pid] });
+      },
+      adoptDescendantsAsRoots: (appSessionId, pid, isCurrent = () => true) => {
+        calls.push({ target: 'cleanup', method: 'processes.adopt', args: [appSessionId, pid] });
+        return options.adoptDescendants?.(isCurrent) ?? Promise.resolve(true);
+      },
+    },
     registry: { getLive: (id) => (id === parentId ? parent : undefined) },
     history,
     timeline: {
@@ -165,7 +181,11 @@ function createHarness(
         return false;
       },
       rearmModelChangedChild: () => Promise.resolve(),
-      resolveLimit: () => Promise.resolve(800),
+      resolveLimit: () => {
+        if (!failResolveLimit) return Promise.resolve(800);
+        failResolveLimit = false;
+        return Promise.reject(new Error('limit lookup failed'));
+      },
     },
     resolveDefaultSettings: () => ({
       modelId: 'model-default',
@@ -1774,6 +1794,33 @@ test('interrupt during in-flight admission delivers nothing', async () => {
   assert.equal(h.owner.counts().queued, 0);
 });
 
+test('an open abandoned after its provider loaded leaves no tracked process', async () => {
+  // The context-limit lookup fails after the provider loaded: the open throws,
+  // closes the provisional session, and never installs a runtime. Nothing will
+  // ever call `closeRuntime` for it, so nothing may have been tracked.
+  const abandoned = childRecord('abandoned', 'provider-abandoned');
+  const healthy = childRecord('healthy', 'provider-healthy');
+  const h = createHarness([abandoned, healthy], { failResolveLimitOnce: true });
+  h.runtime.processIds.set('provider-abandoned', 811);
+  h.runtime.processIds.set('provider-healthy', 822);
+
+  await h.open(abandoned);
+
+  assert.ok(h.sequence.includes('child.error:child.open_failed'));
+  assert.deepEqual(
+    h.calls.filter((call) => call.method.startsWith('processes.')),
+    [],
+  );
+
+  // An open that reaches the install point is still tracked, under the parent.
+  await h.open(healthy);
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method.startsWith('processes.')).map((call) => call.args),
+    [['parent', 822]],
+  );
+});
+
 test('a queued child interrupted then re-prompted delivers only the new prompt', async () => {
   const first = childRecord('first', 'provider-first');
   const second = childRecord('second', 'provider-second');
@@ -1808,6 +1855,7 @@ test('a queued child interrupted then re-prompted delivers only the new prompt',
 test('a settled child idle past the budget releases its provider session', async () => {
   const record = childRecord('child', 'provider');
   const h = createHarness([record]);
+  h.runtime.processIds.set('provider', 811);
   await h.open(record);
   assert.equal(h.owner.counts().live, 1);
 
@@ -1821,15 +1869,194 @@ test('a settled child idle past the budget releases its provider session', async
   assert.equal(h.owner.counts().live, 0);
   assert.deepEqual(
     h.calls
-      .filter((call) => call.target === 'cleanup' && call.method === 'session.close')
-      .map((call) => call.args[0]),
-    ['provider'],
+      .filter((call) => call.method.startsWith('processes.') || call.method === 'session.close')
+      .map((call) => [call.method, ...call.args]),
+    [
+      ['processes.track', 'parent', 811],
+      ['processes.adopt', 'parent', 811],
+      ['session.close', 'provider'],
+      ['processes.untrack', 811],
+    ],
   );
   assert.equal(
     h.events.some((event) => event.type === 'session.child' && !event.runtimeAvailable),
     true,
     'the client must learn the runtime is gone',
   );
+});
+
+test('failed child adoption retains the old provider for retry without closing its replacement', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const record = childRecord('child', 'provider');
+  let attempts = 0;
+  const h = createHarness([record], {
+    adoptDescendants: () => Promise.resolve(++attempts > 1),
+  });
+  h.runtime.processIds.set('provider', 811);
+  await h.open(record);
+  const oldTarget = h.target(record.childSessionId);
+
+  await h.owner.close(record);
+
+  assert.equal(oldTarget.isCurrent(), false);
+  assert.equal(h.owner.counts().live, 0);
+  assert.equal(
+    h.calls.some((call) => call.method === 'session.close'),
+    false,
+  );
+  assert.equal(
+    h.calls.some((call) => call.method === 'processes.untrack'),
+    false,
+  );
+
+  h.runtime.processIds.set('provider', 822);
+  const replacement = await h.open(record);
+  h.advanceClock(5_000);
+  t.mock.timers.tick(5_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'processes.untrack').map((call) => call.args),
+    [[811]],
+  );
+  assert.equal(h.target(record.childSessionId).session, replacement);
+  assert.equal(h.owner.counts().live, 1);
+  await h.owner.closeParent(h.parentId);
+});
+
+test('parent close drains a retired child whose provider close failed', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  h.runtime.processIds.set('provider', 811);
+  const runtime = await h.open(record);
+  runtime.nextCloseError = new Error('close failed');
+  await h.owner.close(record);
+  assert.equal(
+    h.calls.some((call) => call.method === 'processes.untrack'),
+    false,
+  );
+
+  await h.owner.closeParent(h.parentId);
+
+  assert.equal(h.calls.filter((call) => call.method === 'session.close').length, 2);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'processes.untrack').map((call) => call.args),
+    [[811]],
+  );
+});
+
+test('failed retirement keeps its capacity occupied until cleanup admits the next child', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const third = childRecord('third', 'provider-third');
+  let canAdopt = false;
+  const h = createHarness([first, second, third], {
+    maxOpenSessions: 1,
+    adoptDescendants: () => Promise.resolve(canAdopt),
+  });
+  t.after(() => h.owner.shutdown());
+  h.runtime.processIds.set('provider-first', 811);
+  await h.open(first);
+  await h.open(second);
+  await h.open(third);
+
+  const loadedProviders = () =>
+    h.calls.filter((call) => call.method === 'loadSession').map((call) => call.args[0]);
+  assert.deepEqual(loadedProviders(), ['provider-first']);
+  assert.equal(h.owner.counts().queued, 2);
+
+  canAdopt = true;
+  h.advanceClock(5_000);
+  t.mock.timers.tick(5_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(loadedProviders(), ['provider-first', 'provider-second']);
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(h.owner.counts().queued, 1);
+});
+
+test('an exited child provider releases queued capacity when adoption cannot succeed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], {
+    maxOpenSessions: 1,
+    adoptDescendants: () => Promise.resolve(false),
+  });
+  t.after(() => h.owner.shutdown());
+  h.runtime.processIds.set('provider-first', 811);
+  const provider = await h.open(first);
+  await h.open(second);
+  assert.equal(h.owner.counts().queued, 1);
+
+  // The exact process exited, but the runtime retains its historical PID.
+  const isProcessAlive = h.runtime.isProcessAlive.bind(h.runtime);
+  t.mock.method(
+    h.runtime,
+    'isProcessAlive',
+    (session: FactorySession) => session !== provider && isProcessAlive(session),
+  );
+  h.advanceClock(5_000);
+  t.mock.timers.tick(5_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'loadSession').map((call) => call.args[0]),
+    ['provider-first', 'provider-second'],
+  );
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(h.owner.counts().queued, 0);
+});
+
+test('shutdown drains deferred providers after their parent was removed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  h.runtime.processIds.set('provider', 811);
+  const runtime = await h.open(record);
+  const close = runtime.close.bind(runtime);
+  let attempts = 0;
+  t.mock.method(runtime, 'close', async () => {
+    if (++attempts < 3) throw new Error('provider close unavailable');
+    await close();
+  });
+
+  await assert.rejects(h.owner.closeParent(h.parentId), /Could not close every child provider/);
+  assert.equal(h.owner.counts().total, 0);
+  await h.owner.shutdown();
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'processes.untrack').map((call) => call.args),
+    [[811]],
+  );
+  h.advanceClock(5_000);
+  t.mock.timers.tick(5_000);
+  assert.equal(attempts, 3);
+});
+
+test('parent close waits for pending child adoption without reviving the child', async () => {
+  const record = childRecord('child', 'provider');
+  let finishAdoption: () => void = () => undefined;
+  const h = createHarness([record], {
+    adoptDescendants: (isCurrent) =>
+      new Promise<boolean>((resolve) => {
+        finishAdoption = () => resolve(isCurrent());
+      }),
+  });
+  h.runtime.processIds.set('provider', 811);
+  await h.open(record);
+  const closing = h.owner.close(record);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const closingParent = h.owner.closeParent(h.parentId);
+  finishAdoption();
+  await Promise.all([closing, closingParent]);
+
+  assert.equal(h.owner.counts().live, 0);
+  assert.equal(h.calls.filter((call) => call.method === 'session.close').length, 1);
+  assert.equal(h.calls.filter((call) => call.method === 'processes.untrack').length, 1);
 });
 
 test('retirement tells the user why the runtime went away', async () => {

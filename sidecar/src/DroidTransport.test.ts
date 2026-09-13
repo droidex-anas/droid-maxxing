@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RequestPermissionRequestSchema } from '@factory/droid-sdk';
-import { normalizeDroidTransportMessage } from './DroidTransport.js';
+import { RequestPermissionRequestSchema, type DroidClientTransport } from '@factory/droid-sdk';
+import { normalizeDroidTransportMessage, wrapDroidTransport } from './DroidTransport.js';
 
 test('normalizes current CLI permission options before SDK validation', () => {
   const message = {
@@ -53,4 +53,33 @@ test('leaves non-permission messages untouched', () => {
   };
 
   assert.equal(normalizeDroidTransportMessage(message), message);
+});
+
+test('processId survives failed SDK cleanup but excludes an exited child', async () => {
+  const childProcess: { pid: number; exitCode: number | null; signalCode: NodeJS.Signals | null } =
+    {
+      pid: 777,
+      exitCode: null,
+      signalCode: null,
+    };
+  const inner: DroidClientTransport & { childProcess: typeof childProcess | null } = {
+    isConnected: true,
+    childProcess,
+    send() {},
+    onMessage() {},
+    onError() {},
+    close: async () => {
+      inner.childProcess = null;
+      throw new Error('close failed');
+    },
+  };
+  const transport = wrapDroidTransport(inner);
+  assert.equal(transport.processId, 777);
+  await assert.rejects(transport.close(), /close failed/);
+  assert.equal(transport.processId, 777);
+  childProcess.exitCode = 0;
+  assert.equal(transport.processId, undefined);
+  childProcess.exitCode = null;
+  childProcess.signalCode = 'SIGTERM';
+  assert.equal(transport.processId, undefined);
 });

@@ -84,8 +84,12 @@ test('a browser-asset read error after headers leaves the bridge serving', async
 
 test('clients without the current bridge protocol are rejected', async () => {
   await withServer(async (harness) => {
-    const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=${harness.token}`);
-    assert.equal(await socketCloseCode(socket), 1002);
+    for (const protocol of ['', '&bridgeProtocol=3']) {
+      const socket = new WebSocket(
+        `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}${protocol}`,
+      );
+      assert.equal(await socketCloseCode(socket), 1002);
+    }
   });
 });
 
@@ -261,6 +265,7 @@ test('a generation-changed snapshot is delivered before later broadcasts', async
     runtime: { mode: 'cli_auth' as const, droidPath: '/bin/droid', apiKeyConfigured: false },
     sessions: [],
     children: [],
+    processes: {},
     persistence: { durable: true, hadUnflushedWork: false },
     interrupted: [],
   };

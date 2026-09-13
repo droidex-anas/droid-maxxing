@@ -9,7 +9,7 @@ const token = process.env.BRIDGE_TOKEN ?? '';
 const logPath = process.env.CHILD_SESSIONS_SMOKE_LOG;
 const allowAnyToken = process.env.CHILD_SESSIONS_SMOKE_ALLOW_ANY_TOKEN === '1';
 const streamEventCount = Number(process.env.CHILD_SESSIONS_SMOKE_STREAM_EVENTS ?? '0');
-const bridgeProtocolVersion = '3';
+const bridgeProtocolVersion = '4';
 const bridgeGeneration = `child-session-smoke-${String(process.pid)}`;
 let nextBridgeSequence = 1;
 
@@ -65,6 +65,7 @@ const child = (parentAppSessionId, childSessionId, label, status, transcriptAvai
   reasoningEffort: 'high',
   spawnLink: { kind: 'tool-use', id: `tool-${parentAppSessionId}-${childSessionId}` },
   transcriptAvailable,
+  streamFidelity: 'state',
   startedAt: now - 5_000,
 });
 
@@ -380,7 +381,7 @@ server.on('connection', (socket, request) => {
         send(socket, { type: 'settings.defaults', defaults: {} });
         break;
       case 'sessions.list':
-        send(socket, { type: 'sessions.list', sessions: parents });
+        send(socket, { type: 'sessions.list', sessions: parents, earlierSessionsByCwd: {} });
         break;
       case 'session.loadHistory':
         history(socket, command.appSessionId);

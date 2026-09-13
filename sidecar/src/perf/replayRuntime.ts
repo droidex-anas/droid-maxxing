@@ -185,6 +185,14 @@ export class ReplayFactoryRuntime implements FactoryRuntime {
     return Promise.resolve(undefined);
   }
 
+  processIdOf(): number | undefined {
+    return undefined;
+  }
+
+  isProcessAlive(): boolean {
+    return false;
+  }
+
   sessionByIndex(index: number): ReplayFactorySession | undefined {
     return this.sessions[index];
   }

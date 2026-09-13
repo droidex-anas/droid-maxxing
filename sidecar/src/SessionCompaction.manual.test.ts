@@ -88,8 +88,10 @@ class TestRegistry {
   }
 }
 
-function createHarness() {
+function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise<boolean> } = {}) {
   const calls: RecordedCall[] = [];
+  const untracked: number[] = [];
+  const tracked = new Map<number, string>();
   const errors: CompactionError[] = [];
   const preserved: { appSessionId: string; tokensIn: number; tokensOut: number }[] = [];
   const refreshed: string[] = [];
@@ -129,6 +131,17 @@ function createHarness() {
       },
     },
     runtime,
+    agentProcesses: {
+      track: (_appSessionId, pid, _isAlive, kind = 'provider') => {
+        tracked.set(pid, kind);
+      },
+      untrack: (pid) => {
+        untracked.push(pid);
+        tracked.delete(pid);
+      },
+      adoptDescendantsAsRoots: () =>
+        options.adopt?.() ?? Promise.resolve(options.adoptSucceeds ?? true),
+    },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
     makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
     emitError: (error) => {
@@ -143,6 +156,8 @@ function createHarness() {
   });
   return {
     calls,
+    untracked,
+    tracked,
     compaction,
     errors,
     preserved,
@@ -265,6 +280,131 @@ test('provider adoption retries cleanly after a partial first adoption', async (
     h.errors.some((error) => error.message.includes('first persistence failed')),
     true,
   );
+});
+
+test('failed descendant adoption keeps the old provider alive for lifecycle cleanup', async () => {
+  const h = createHarness({ adoptSucceeds: false });
+  const { live, session: original } = addLive(h);
+  h.runtime.processIds.set('provider-1', 600);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  h.runtime.loadQueue.set('provider-2', [
+    new FakeFactorySession('provider-2', {}, h.calls),
+    new FakeFactorySession('provider-2', {}, h.calls),
+  ]);
+
+  const result = await h.compaction.compact('app-1');
+
+  assert.equal(result.kind, 'close-and-resume');
+  assert.equal(live.session, original);
+  assert.deepEqual(h.untracked, []);
+  assert.equal(closeCount(h.calls, 'provider-1'), 0);
+  assert.equal(closeCount(h.calls, 'provider-2'), 2);
+});
+
+test('a failed provider close retains ownership until a successful retry', async () => {
+  const h = createHarness();
+  const { live, session: original } = addLive(h);
+  h.runtime.processIds.set('provider-1', 600);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  original.nextCloseError = new Error('provider close failed');
+  const failedReplacement = new FakeFactorySession('provider-2', {}, h.calls);
+  const replacement = new FakeFactorySession('provider-2', {}, h.calls);
+  h.runtime.loadQueue.set('provider-2', [failedReplacement, replacement]);
+
+  await h.compaction.compact('app-1');
+
+  assert.equal(live.session, replacement);
+  assert.equal(closeCount(h.calls, 'provider-1'), 2);
+  assert.equal(closeCount(h.calls, 'provider-2'), 1);
+  assert.deepEqual(h.untracked, [600]);
+  assert.ok(h.errors.some((error) => error.message.includes('provider close failed')));
+});
+
+test('failed provisional close preserves the adoption error and leaves its pid owned', async () => {
+  const h = createHarness({ adoptSucceeds: false });
+  const { live, session: original } = addLive(h);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  h.runtime.processIds.set('provider-1', 600);
+  const first = new FakeFactorySession('provider-2', {}, h.calls);
+  const second = new FakeFactorySession('provider-2', {}, h.calls);
+  first.nextCloseError = new Error('replacement close failed');
+  second.nextCloseError = new Error('replacement close failed');
+  const pids = new Map([
+    [original, 600],
+    [first, 610],
+    [second, 620],
+  ]);
+  h.runtime.processIdOf = (session) => {
+    for (const [provider, pid] of pids) if (session === provider) return pid;
+    return undefined;
+  };
+  h.runtime.loadQueue.set('provider-2', [first, second]);
+  const result = await h.compaction.compact('app-1');
+  assert.equal(result.kind, 'close-and-resume');
+  if (result.kind === 'close-and-resume')
+    assert.match(result.reloadError, /Could not preserve processes/);
+  assert.equal(live.session, original);
+  assert.deepEqual(
+    [...h.tracked],
+    [
+      [610, 'provisional'],
+      [620, 'provisional'],
+    ],
+  );
+  assert.deepEqual(h.untracked, []);
+  assert.equal(closeCount(h.calls, 'provider-1'), 0);
+});
+
+test('provider load completing after close cannot replace a reopened session', async () => {
+  const h = createHarness();
+  const { live, session: original } = addLive(h);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  const pending = new FakeFactorySession('provider-2', {}, h.calls);
+  h.runtime.loadQueue.set('provider-2', [pending]);
+  const gate = h.runtime.deferNextLoad();
+  const compacting = h.compaction.compact('app-1');
+  await h.runtime.waitForLoad('provider-2');
+  live.closeMode = 'discard-pending';
+  const { live: reopened } = addLive(h, 'app-1', 'reopened');
+  gate.resolve();
+  await compacting;
+
+  assert.equal(h.registry.getLive('app-1'), reopened);
+  assert.equal(reopened.summary.providerSessionId, 'reopened');
+  assert.equal(live.session, original);
+  assert.equal(closeCount(h.calls, 'provider-2'), 1);
+  assert.deepEqual(h.preserved, []);
+});
+
+test('provider adoption completing after close leaves cleanup to lifecycle', async () => {
+  let finishAdoption: (adopted: boolean) => void = () => {};
+  let adoptionStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    adoptionStarted = resolve;
+  });
+  const h = createHarness({
+    adopt: () => {
+      adoptionStarted();
+      return new Promise((resolve) => {
+        finishAdoption = resolve;
+      });
+    },
+  });
+  const { live, session: original } = addLive(h);
+  h.runtime.processIds.set('provider-1', 600);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  h.runtime.loadQueue.set('provider-2', [new FakeFactorySession('provider-2', {}, h.calls)]);
+  const compacting = h.compaction.compact('app-1');
+  await started;
+  live.closeMode = 'discard-pending';
+  finishAdoption(false);
+  await compacting;
+
+  assert.equal(live.session, original);
+  assert.equal(closeCount(h.calls, 'provider-1'), 0);
+  assert.equal(closeCount(h.calls, 'provider-2'), 1);
+  assert.deepEqual(h.untracked, []);
+  assert.deepEqual(h.preserved, []);
 });
 
 test('provider adoption continuations become inert after shutdown starts', async () => {

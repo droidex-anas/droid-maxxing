@@ -1,6 +1,24 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import { commandLineContains } from '../../lib/commandLineMatch';
+import { LiveProcessesContext } from './liveProcessesContext';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
+
+// A backgrounded server keeps its card "running" after the turn ends as long
+// as a live agent process still carries the command the agent typed.
+function useCommandStillRunning(command: string): boolean {
+  const processes = useContext(LiveProcessesContext);
+  if (processes.length === 0) return false;
+  const needle = command.trim();
+  return (
+    needle.length > 3 &&
+    processes.some(
+      (p) =>
+        commandLineContains(p.command, needle) ||
+        (p.originCommand !== undefined && commandLineContains(p.originCommand, needle)),
+    )
+  );
+}
 
 /* ── Terminal-style body shared by every tool call: what was called, then
    what came back, in the same bordered panel language as expanded diffs. No
@@ -54,6 +72,7 @@ export function CommandCard({
   error?: boolean;
   running?: boolean;
 }) {
+  const alive = useCommandStillRunning(command);
   return (
     <ToolCallCard
       heading={
@@ -69,7 +88,7 @@ export function CommandCard({
       }
       output={output}
       error={error}
-      running={running}
+      running={running || alive}
     />
   );
 }
@@ -91,13 +110,26 @@ export function CommandLine({
   forceOpen?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const alive = useCommandStillRunning(command);
   const expanded = open || forceOpen;
+  const label = (
+    <>
+      {running || alive ? (
+        <span className="shimmer-text shrink-0 font-medium">Running</span>
+      ) : (
+        <span className="shrink-0 text-droid-text-secondary">Ran</span>
+      )}
+      <span className="min-w-0 truncate text-droid-text-muted">{command}</span>
+    </>
+  );
+  // Only a still-running turn hides the expander: a finished call whose
+  // process is still alive already has captured output, and that output must
+  // stay reachable. It keeps the Running indicator in place of "Ran".
   if (running) {
     return (
       <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
         <span className="w-3 shrink-0" aria-hidden="true" />
-        <span className="shimmer-text shrink-0 font-medium">Running</span>
-        <span className="min-w-0 truncate text-droid-text-muted">{command}</span>
+        {label}
       </div>
     );
   }
@@ -111,8 +143,7 @@ export function CommandLine({
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
-        <span className="shrink-0 text-droid-text-secondary">Ran</span>
-        <span className="min-w-0 truncate text-droid-text-muted">{command}</span>
+        {label}
         {error && <ErrorTag />}
       </button>
       <Expand open={expanded}>

@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   ReasoningEffort,
   type AskUserResult,
+  type McpServerConfig,
   type RequestPermissionHandlerResult,
 } from '@factory/droid-sdk';
 import type { HistoricalSession } from './history.js';
@@ -89,11 +90,13 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let compactionLimit = (): Promise<number> => Promise.resolve(800);
   let shutdownStarted = false;
   let closeChildren: (appSessionId: string) => Promise<void> = () => Promise.resolve();
+  let killProcesses: (appSessionId: string) => Promise<void> = () => Promise.resolve();
   let emitSessionList: (closedProviderSessionId: string) => void | Promise<void> = () =>
     recordEvent({ type: 'sessions.list', ...registry.listSummaries() });
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
+  let mcpConfigs: McpServerConfig[] = [];
   const historical = (): HistoricalSession[] =>
     ordinarySummaries.map((item) => ({ summary: { ...item }, progress: [] }));
   const recordEvent = (event: ServerEvent): void => {
@@ -155,7 +158,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
             },
           },
         ],
-        configs: [],
+        configs: mcpConfigs,
       });
     },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
@@ -200,6 +203,25 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       },
     },
     isShutdownStarted: () => shutdownStarted,
+    agentProcesses: {
+      setIgnoredCommands: (appSessionId, patterns) => {
+        calls.push({
+          target: 'runtime',
+          method: 'processes.setIgnoredCommands',
+          args: [appSessionId, ...patterns],
+        });
+      },
+      track: (appSessionId, pid) => {
+        calls.push({ target: 'runtime', method: 'processes.track', args: [appSessionId, pid] });
+      },
+      untrack: (pid) => {
+        calls.push({ target: 'cleanup', method: 'processes.untrack', args: [pid] });
+      },
+      killSession: (appSessionId) => {
+        calls.push({ target: 'cleanup', method: 'processes.killSession', args: [appSessionId] });
+        return killProcesses(appSessionId);
+      },
+    },
     applyPendingSettingsToSummary: (item) => ({ ...item, ...projection }),
     applyPendingSessionSettings: (appSessionId) => applyPending(appSessionId),
     runPrimaryTurn: async (live, prompt) => {
@@ -298,6 +320,12 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     },
     setChildCloser: (action: (appSessionId: string) => Promise<void>) => {
       closeChildren = action;
+    },
+    setProcessKiller: (action: (appSessionId: string) => Promise<void>) => {
+      killProcesses = action;
+    },
+    setMcpConfigs: (configs: McpServerConfig[]) => {
+      mcpConfigs = configs;
     },
     failNextEmit: (type: ServerEvent['type'], error: Error) => {
       nextEmitFailure = { type, error };
@@ -519,6 +547,7 @@ test('post-open create and resume failures close provider and MCP resources', as
 test('registration failure closes resources without indexing the failed session', async () => {
   const harness = createHarness();
   queueCreate(harness, 'failed-registration');
+  harness.runtime.processIds.set('failed-registration', 4321);
   harness.history.nextSyncError = new Error('persist failed');
 
   await harness.lifecycle.create(createCommand());
@@ -537,15 +566,52 @@ test('registration failure closes resources without indexing the failed session'
     harness.events.some((event) => event.type === 'error' && event.message === 'persist failed'),
     true,
   );
+  // Kill-then-untrack, same order as the normal close path: anything the
+  // provider spawned before the failure is only reachable while it is alive.
+  assert.deepEqual(
+    harness.calls
+      .filter((call) => call.method.startsWith('processes.') && call.method !== 'processes.track')
+      .map((call) => call.method),
+    ['processes.killSession', 'processes.untrack'],
+  );
 });
 
-test('post-registration publication failures unregister and close opened resources', async () => {
+test('post-registration failures retain cleanup ownership through a process outage', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const created = createHarness();
   queueCreate(created, 'failed-create-publication');
+  let discoveryFailed = true;
+  created.setProcessKiller(async () => {
+    if (discoveryFailed) throw new Error('process discovery unavailable');
+  });
+  created.setChildCloser(async () => {
+    created.calls.push({ target: 'cleanup', method: 'children.close', args: [] });
+  });
   created.failNextEmit('session.created', new Error('create publication failed'));
 
   await created.lifecycle.create(createCommand());
+  const failedOpen = requireLive(created, 'failed-create-publication');
+  assert.equal(failedOpen.closeMode, 'discard-pending');
+  assert.equal(
+    created.calls.some((call) => call.method === 'session.close'),
+    false,
+  );
+  assert.equal(
+    created.calls.some((call) => call.method === 'mcp.close'),
+    false,
+  );
+  discoveryFailed = false;
+  t.mock.timers.tick(5000);
+  await failedOpen.closePromise;
 
+  assert.deepEqual(
+    created.calls
+      .map((call) => call.method)
+      .filter((method) =>
+        ['processes.killSession', 'children.close', 'session.close'].includes(method),
+      ),
+    ['processes.killSession', 'processes.killSession', 'children.close', 'session.close'],
+  );
   assert.equal(created.registry.getLive('failed-create-publication'), undefined);
   assert.deepEqual(
     created.calls
@@ -901,6 +967,32 @@ test('create and resume abandon in-flight opens when shutdown admission closes',
   );
 });
 
+test('failed process cleanup preserves the provider and allows closing to retry', async () => {
+  const h = createHarness([summary('owned')]);
+  queueLoad(h, 'owned');
+  await h.lifecycle.resume('owned');
+  const live = requireLive(h, 'owned');
+  h.calls.length = 0;
+  h.setProcessKiller(() => Promise.reject(new Error('ps unavailable')));
+
+  await assert.rejects(h.lifecycle.close('owned'), /ps unavailable/);
+  assert.equal(h.registry.getLive('owned'), live);
+  assert.equal(live.closeMode, undefined);
+  assert.equal(live.closePromise, undefined);
+  assert.equal(
+    h.calls.some((call) => call.method === 'session.close'),
+    false,
+  );
+  await assert.rejects(h.lifecycle.closeAll(), /ps unavailable/);
+  assert.equal(h.calls.filter((call) => call.method === 'processes.killSession').length, 2);
+  assert.equal(h.registry.getLive('owned'), live);
+
+  h.setProcessKiller(() => Promise.resolve());
+  await h.lifecycle.close('owned');
+  assert.equal(h.registry.getLive('owned'), undefined);
+  assert.equal(h.calls.filter((call) => call.method === 'session.close').length, 1);
+});
+
 test('close follows ownership order and closeAll closes its initial snapshot', async () => {
   const harness = createHarness();
   const provider = new CallbackCloseSession('owner', harness.calls, () => {
@@ -986,6 +1078,32 @@ test('close follows ownership order and closeAll closes its initial snapshot', a
   );
   await all.lifecycle.closeAll();
   assert.equal(all.registry.liveSessionsSnapshot().length, 0);
+});
+
+test('closeAll kills every session in one pass before the serialized closes', async () => {
+  const h = createHarness();
+  const first = queueCreate(h, 'first');
+  await h.lifecycle.create(createCommand());
+  await first.waitForPrompts(1);
+  const second = queueCreate(h, 'second');
+  await h.lifecycle.create(createCommand());
+  await second.waitForPrompts(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  h.calls.length = 0;
+
+  await h.lifecycle.closeAll();
+
+  // Shutdown is on a budget the sidecar force-exits: the kill grace has to be
+  // paid once for all sessions, not once per session. Each close still kills
+  // its own (a single close has no other owner), which is a no-op by then.
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === 'processes.killSession' || call.method === 'session.close')
+      .map(
+        (call) => `${call.method === 'session.close' ? 'close' : 'kill'}:${String(call.args[0])}`,
+      ),
+    ['kill:first', 'kill:second', 'kill:first', 'close:first', 'kill:second', 'close:second'],
+  );
 });
 
 test('close waits for the authoritative post-close session list', async () => {
@@ -1187,4 +1305,73 @@ test('pending settings stay projected until successful first-send application', 
   assert.deepEqual(failedProvider.prompts, []);
   assert.equal(failed.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
   assert.equal(failed.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
+});
+
+test('closing a session kills its agent processes while the provider is still their parent', async () => {
+  const h = createHarness();
+  const provider = queueCreate(h, 'created-pid');
+  h.runtime.processIds.set('created-pid', 4321);
+  h.setChildCloser((appSessionId) => {
+    h.calls.push({ target: 'cleanup', method: 'children.close', args: [appSessionId] });
+    return Promise.resolve();
+  });
+  await h.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+
+  await h.lifecycle.close('created-pid');
+
+  assert.deepEqual(
+    h.calls
+      .filter(
+        (call) =>
+          call.method.startsWith('processes.') ||
+          call.method === 'children.close' ||
+          call.method === 'session.close',
+      )
+      .map((call) => [call.method, ...call.args]),
+    [
+      ['processes.setIgnoredCommands', 'created-pid'],
+      ['processes.track', 'created-pid', 4321],
+      // The kill has to precede every provider close of the session: once
+      // `droid` exits, its dev servers are reparented and no longer reachable
+      // from its pid. Child runtimes are tracked under the same session id, so
+      // their servers go with this one call too.
+      ['processes.killSession', 'created-pid'],
+      ['children.close', 'created-pid'],
+      ['session.close', 'created-pid'],
+      ['processes.untrack', 4321],
+    ],
+  );
+});
+
+test('a resumed session tracks the pid of the provider it reloaded', async () => {
+  const h = createHarness([summary('app-2', 'provider-2')]);
+  queueLoad(h, 'provider-2');
+  h.runtime.processIds.set('provider-2', 991);
+
+  await h.lifecycle.resume('app-2');
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'processes.track').map((call) => call.args),
+    [['app-2', 991]],
+  );
+});
+
+test("configured stdio MCP servers become the session's ignored command lines", async () => {
+  const h = createHarness();
+  h.setMcpConfigs([
+    { name: 'local', command: 'npx', args: ['-y', 'some-mcp'], env: {} },
+    { name: 'remote', type: 'http', url: 'https://mcp.example', headers: [] },
+  ]);
+  const provider = queueCreate(h, 'created-ignored');
+  h.runtime.processIds.set('created-ignored', 4321);
+  await h.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === 'processes.setIgnoredCommands')
+      .map((call) => call.args),
+    [['created-ignored', 'npx -y some-mcp']],
+  );
 });
