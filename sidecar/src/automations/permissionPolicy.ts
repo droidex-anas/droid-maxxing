@@ -55,17 +55,6 @@ export function automationToolDisplayTitle(serverName: string, toolName: string)
   return tool ? TOOL_TITLES[tool] : null;
 }
 
-export function shouldAutoApproveAutomationPermission(
-  params: RequestPermissionRequestParams,
-  autonomy: AutomationPermissionAutonomy | undefined,
-  unattended = false,
-): boolean {
-  const target = automationPermissionTarget(params);
-  return target
-    ? shouldAutoApproveAutomationTool(target.serverName, target.toolName, autonomy, unattended)
-    : false;
-}
-
 export function shouldAutoApproveAutomationTool(
   serverName: string,
   toolName: string,

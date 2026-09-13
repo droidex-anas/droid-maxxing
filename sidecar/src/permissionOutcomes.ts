@@ -1,39 +1,42 @@
-import { ToolConfirmationOutcome } from '@factory/droid-sdk';
+import type { PermissionOutcome } from './protocol.js';
 
-const SDK_OUTCOMES = new Set<string>(Object.values(ToolConfirmationOutcome));
-
-const OUTCOME_ALIASES: Record<string, ToolConfirmationOutcome> = {
-  proceed_once: ToolConfirmationOutcome.ProceedOnce,
-  proceed_always: ToolConfirmationOutcome.ProceedAlways,
-  proceed_always_tools: ToolConfirmationOutcome.ProceedAlways,
-  proceed_auto_run: ToolConfirmationOutcome.ProceedAutoRun,
-  proceed_auto_run_low: ToolConfirmationOutcome.ProceedAutoRunLow,
-  proceed_auto_run_medium: ToolConfirmationOutcome.ProceedAutoRunMedium,
-  proceed_auto_run_high: ToolConfirmationOutcome.ProceedAutoRunHigh,
-  proceed_new_session: ToolConfirmationOutcome.ProceedNewSession,
-  proceed_new_session_low: ToolConfirmationOutcome.ProceedNewSessionLow,
-  proceed_new_session_medium: ToolConfirmationOutcome.ProceedNewSessionMedium,
-  proceed_new_session_high: ToolConfirmationOutcome.ProceedNewSessionHigh,
-  proceed_edit: ToolConfirmationOutcome.ProceedEdit,
-  cancel: ToolConfirmationOutcome.Cancel,
+const PERMISSION_OUTCOMES: Record<PermissionOutcome, true> = {
+  proceed_once: true,
+  proceed_always: true,
+  proceed_auto_run: true,
+  proceed_auto_run_low: true,
+  proceed_auto_run_medium: true,
+  proceed_auto_run_high: true,
+  proceed_new_session: true,
+  proceed_new_session_low: true,
+  proceed_new_session_medium: true,
+  proceed_new_session_high: true,
+  proceed_edit: true,
+  cancel: true,
 };
 
-export function normalizePermissionOutcome(outcome: string): ToolConfirmationOutcome {
-  const normalized = OUTCOME_ALIASES[outcome];
-  if (normalized) return normalized;
-  if (SDK_OUTCOMES.has(outcome)) return outcome as ToolConfirmationOutcome;
+// An MCP always-allow the renderer may still send; DROIDEX records it as a plain
+// always-allow grant.
+const OUTCOME_ALIASES = new Map<string, PermissionOutcome>([
+  ['proceed_always_tools', 'proceed_always'],
+]);
+
+export function normalizePermissionOutcome(outcome: string): PermissionOutcome {
+  const alias = OUTCOME_ALIASES.get(outcome);
+  if (alias) return alias;
+  if (Object.hasOwn(PERMISSION_OUTCOMES, outcome)) return outcome as PermissionOutcome;
   throw new Error(`Unsupported permission outcome: ${outcome}`);
 }
 
 export function isApprovalOutcome(outcome: string): boolean {
-  return normalizePermissionOutcome(outcome) !== ToolConfirmationOutcome.Cancel;
+  return normalizePermissionOutcome(outcome) !== 'cancel';
 }
 
 // True only for a valid "always allow" outcome. Invalid/unknown outcomes return
 // false so they can never persist an always-allow grant.
 export function isAlwaysOutcome(outcome: string): boolean {
   try {
-    return normalizePermissionOutcome(outcome) === ToolConfirmationOutcome.ProceedAlways;
+    return normalizePermissionOutcome(outcome) === 'proceed_always';
   } catch {
     return false;
   }

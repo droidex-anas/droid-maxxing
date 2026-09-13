@@ -3,14 +3,15 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import {
-  ReasoningEffort,
-  type AskUserResult,
-  type McpServerConfig,
-  type RequestPermissionHandlerResult,
-} from '@factory/droid-sdk';
+import { ReasoningEffort, type McpServerConfig } from '@factory/droid-sdk';
 import type { HistoricalSession } from './history.js';
-import type { FactoryDefaultSettings, ServerEvent, SessionSummary } from './protocol.js';
+import type {
+  FactoryDefaultSettings,
+  PermissionOutcome,
+  ServerEvent,
+  SessionSummary,
+} from './protocol.js';
+import type { ProviderQuestionAnswers } from './providers/interactions.js';
 import {
   SessionLifecycle,
   type LiveSession,
@@ -161,8 +162,10 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
         configs: mcpConfigs,
       });
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    interactionsFor: () => ({
+      requestApproval: () => new Promise<PermissionOutcome>(() => undefined),
+      requestQuestion: () => new Promise<ProviderQuestionAnswers>(() => undefined),
+    }),
     compaction: {
       resolveLimit: () => compactionLimit(),
       arm: async (target, limit) => {

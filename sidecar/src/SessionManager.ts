@@ -393,6 +393,7 @@ export class SessionManager {
       emit: (event) => {
         this.emit(event);
       },
+      exitSpecModeForRun: (appSessionId) => this.exitSpecModeForRun(appSessionId),
       emitError: (error) => {
         this.emitError(error);
       },
@@ -403,8 +404,7 @@ export class SessionManager {
       timeline: this.timeline,
       runtime: this.runtime,
       agentProcesses: this.agentProcesses,
-      makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
-      makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
+      interactionsFor: (ref) => this.interactions.interactionsFor(ref),
       emitError: (error) => {
         this.emitError(error);
       },
@@ -494,8 +494,7 @@ export class SessionManager {
       getFactoryDefaults: () => this.getFactoryDefaults(),
       maxContextTokensForModel: (modelId) => this.maxContextTokensForModel(modelId),
       startLocalMcpServers: (ref, cwd) => this.startLocalMcpServers(ref, cwd),
-      makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
-      makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
+      interactionsFor: (ref) => this.interactions.interactionsFor(ref),
       compaction: this.compaction,
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       childSessions: this.childSessions,
@@ -1600,6 +1599,14 @@ export class SessionManager {
         message: `Could not switch interaction mode: ${errMsg(err)}`,
       });
     }
+  }
+
+  // An approved Spec plan runs in Auto. Only the provider switch lives here; the
+  // interaction layer owns the summary update that goes with it.
+  private async exitSpecModeForRun(appSessionId: string): Promise<void> {
+    const liveSession = this.registry.getLive(appSessionId);
+    if (!liveSession) return;
+    await liveSession.session.updateSettings({ interactionMode: DroidInteractionMode.Auto });
   }
 
   // Spec-mode turns run on specModeModelId. Align it with the session's visible

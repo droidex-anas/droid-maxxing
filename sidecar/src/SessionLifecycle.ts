@@ -1,8 +1,4 @@
-import {
-  type AskUserHandler,
-  type McpServerConfig,
-  type PermissionHandler,
-} from '@factory/droid-sdk';
+import { type McpServerConfig } from '@factory/droid-sdk';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
@@ -29,6 +25,8 @@ import {
   errMsg,
   requireAutonomyForCommand,
 } from './sessionHelpers.js';
+import { droidInteractionHandlers } from './providers/droid/droidInteractions.js';
+import type { ProviderInteractions } from './providers/interactions.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
 
@@ -90,8 +88,7 @@ export interface SessionLifecycleDependencies {
     ref: { id: string; clientRef?: string },
     cwd?: string,
   ) => Promise<StartedLocalMcpResources>;
-  makePermissionHandler: (ref: { id: string }) => PermissionHandler;
-  makeAskUserHandler: (ref: { id: string }) => AskUserHandler;
+  interactionsFor: (ref: { id: string }) => ProviderInteractions;
   compaction: Pick<
     SessionCompaction,
     'resolveLimit' | 'arm' | 'subscribePrimary' | 'afterTurn' | 'cancel' | 'forgetSession'
@@ -168,8 +165,7 @@ export class SessionLifecycle {
         compactionModel,
         compactionTokenLimit,
         mcpServers: mcp.configs,
-        permissionHandler: d.makePermissionHandler(ref),
-        askUserHandler: d.makeAskUserHandler(ref),
+        ...droidInteractionHandlers(ref, d.interactionsFor(ref)),
       });
       const session = await d.runtime.createSession(runtimeOptions);
       pendingSession = session;
@@ -261,8 +257,7 @@ export class SessionLifecycle {
       const mcp = await d.startLocalMcpServers(ref, historical?.cwd);
       pendingMcpServers = mcp.servers;
       const session = await d.runtime.loadSession(providerSessionId, {
-        permissionHandler: d.makePermissionHandler(ref),
-        askUserHandler: d.makeAskUserHandler(ref),
+        ...droidInteractionHandlers(ref, d.interactionsFor(ref)),
         cwd: historical?.cwd,
         mcpServers: mcp.configs,
       });
