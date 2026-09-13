@@ -27,8 +27,26 @@ import {
 } from './sessionHelpers.js';
 import { droidInteractionHandlers } from './providers/droid/droidInteractions.js';
 import type { ProviderInteractions } from './providers/interactions.js';
+import {
+  DEFAULT_PROVIDER,
+  requireProviderKind,
+  type ProviderKind,
+} from './providers/providerKind.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
+
+// The binding is recorded on every session, but only Droid has a runtime behind
+// it so far. Refusing the others here keeps a stamped session from silently
+// running on Droid until its provider is routed.
+function requireSupportedProvider(requested: unknown): ProviderKind {
+  const provider = requireProviderKind(requested);
+  if (provider !== DEFAULT_PROVIDER) {
+    throw new Error(`Sessions on the ${provider} provider are not available yet.`);
+  }
+  return provider;
+}
+
+const boundProvider = (summary: SessionSummary | undefined) => summary?.provider;
 
 async function sessionRuntimeCwd(appCwd: string): Promise<string> {
   if (appCwd) return appCwd;
@@ -128,9 +146,11 @@ export class SessionLifecycle {
     let pendingLiveSession: LiveSession | undefined;
 
     try {
-      // Validate the required autonomy snapshot before any slow or fallible
-      // discovery work so a missing snapshot always gets its own diagnostic.
+      // Validate the required autonomy snapshot and the provider binding before
+      // any slow or fallible discovery work so a bad command always gets its own
+      // diagnostic instead of failing mid-open.
       const autonomy = requireAutonomyForCommand(command);
+      const provider = requireSupportedProvider(command.provider);
       const defaults = await d.getFactoryDefaults();
       const interactionMode = createInteractionModeForCommand(command, defaults);
       const defaultsMode = createDefaultsModeForCommand(command, interactionMode);
@@ -189,6 +209,7 @@ export class SessionLifecycle {
         compactionModel,
         agents,
         autonomy,
+        provider,
         ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
         ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
         now: Date.now(),
@@ -254,6 +275,7 @@ export class SessionLifecycle {
     let pendingSession: FactorySession | undefined;
     let pendingLiveSession: LiveSession | undefined;
     try {
+      requireSupportedProvider(boundProvider(historical));
       const mcp = await d.startLocalMcpServers(ref, historical?.cwd);
       pendingMcpServers = mcp.servers;
       const session = await d.runtime.loadSession(providerSessionId, {

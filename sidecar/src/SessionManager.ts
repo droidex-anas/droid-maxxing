@@ -106,6 +106,7 @@ import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfigur
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
+import { assertProviderUnchanged } from './providers/providerKind.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -738,6 +739,7 @@ export class SessionManager {
         await this.childSessions.updateSettings(cmd);
         return;
       case 'session.updateSettings':
+        assertProviderUnchanged(cmd);
         await this.updateSessionSettings(cmd.appSessionId, cmd);
         if (cmd.autonomy !== undefined) {
           await this.setAutonomy(cmd.appSessionId, cmd.autonomy);
@@ -824,6 +826,7 @@ export class SessionManager {
         return;
       }
       case 'settings.agent.update':
+        assertProviderUnchanged(cmd);
         await this.updateAgentSettings(cmd);
         return;
       case 'settings.compaction.update':

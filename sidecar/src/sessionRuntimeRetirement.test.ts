@@ -103,6 +103,7 @@ function liveSession(appSessionId: string, updatedAt: number): LiveSession {
   const summary = {
     appSessionId,
     providerSessionId: appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

@@ -6,6 +6,7 @@ import type { ContextStatsSnapshot, SessionSummary, TranscriptEvent } from '../t
 const session = (autoCompactions = 0): SessionSummary => ({
   appSessionId: 'm1',
   providerSessionId: 'provider-1',
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',

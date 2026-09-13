@@ -1,5 +1,6 @@
 import type { BridgeFeature, SessionSummary } from './protocol.js';
 import type { ReasoningEffort } from './protocol.js';
+import { PROVIDER_KINDS } from './providers/providerKind.js';
 import { objectValue, stringValue } from './values.js';
 
 interface PersistedSessionFileSummary {
@@ -53,9 +54,12 @@ function isSessionSummary(value: unknown): value is SessionSummary {
 }
 
 function hasRequiredSummaryFields(summary: Record<string, unknown>): boolean {
-  const { sessionPurpose, interactionMode, role, autonomy, phase, features } = summary;
+  const { provider, sessionPurpose, interactionMode, role, autonomy, phase, features } = summary;
   return (
     strings(summary, ['appSessionId', 'title', 'goal', 'cwd']) &&
+    // A row cached before the provider binding existed is rebuilt from its
+    // session file rather than published without one.
+    oneOf(provider, PROVIDER_KINDS) &&
     oneOf(sessionPurpose, ['chat', 'design', 'mission-control']) &&
     oneOf(interactionMode, ['auto', 'spec', 'agi']) &&
     oneOf(role, ['primary', 'user']) &&

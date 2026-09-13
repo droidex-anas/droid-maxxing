@@ -16,6 +16,11 @@ export type {
   McpToolInfo,
 } from './mcp.js';
 
+// Which agent runtime a session runs on. Bound once when the session is
+// created and never changed afterwards.
+export const PROVIDER_KINDS = ['droid', 'claude', 'codex'] as const;
+export type ProviderKind = (typeof PROVIDER_KINDS)[number];
+
 export type SessionPhase =
   | 'intake'
   | 'planning'
@@ -114,6 +119,8 @@ export interface SessionSummary {
   providerSessionId?: string;
   compactedFromProviderSessionIds?: string[];
   missionId?: string;
+  // Agent runtime this session is bound to, fixed at creation.
+  provider: ProviderKind;
   sessionPurpose: SessionPurpose;
   interactionMode: SessionInteractionMode;
   role: 'primary' | 'user';
@@ -594,6 +601,8 @@ export type ClientCommand =
       title: string;
       goal: string;
       sessionPurpose: SessionPurpose;
+      // Omitted means the default provider.
+      provider?: ProviderKind;
       interactionMode?: SessionInteractionMode;
       modelId?: string;
       reasoningEffort?: ReasoningEffort;

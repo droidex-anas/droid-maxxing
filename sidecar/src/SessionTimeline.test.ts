@@ -88,6 +88,7 @@ function summary(
   return {
     appSessionId,
     providerSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

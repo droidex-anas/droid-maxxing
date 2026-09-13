@@ -10,6 +10,7 @@ import { ArchivedChatsSettings } from './ArchivedChatsSettings';
 function makeSession(appSessionId: string, title: string): SessionSummary {
   return {
     appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

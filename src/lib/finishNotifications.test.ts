@@ -17,6 +17,7 @@ import {
 const session = (over: Partial<SessionSummary> = {}): SessionSummary =>
   ({
     appSessionId: 's1',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

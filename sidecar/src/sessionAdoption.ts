@@ -5,6 +5,7 @@ import type {
   LiveSessionIdentity,
 } from './liveRuntimeJournal.js';
 import type { InterruptedSessionRecord, SessionPhase, SessionSummary } from './protocol.js';
+import { DEFAULT_PROVIDER } from './providers/providerKind.js';
 import { errMsg } from './sessionHelpers.js';
 import type { SessionLifecycle } from './SessionLifecycle.js';
 import { adoptedSessionFacts, isDueForRetirement } from './sessionRuntimeRetirement.js';
@@ -199,6 +200,7 @@ function syntheticSummary(identity: LiveSessionIdentity): SessionSummary {
   return {
     appSessionId: identity.appSessionId,
     providerSessionId: identity.providerSessionId,
+    provider: DEFAULT_PROVIDER,
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

@@ -16,6 +16,7 @@ import {
 const session = (appSessionId: string, cwd: string, updatedAt: number): SessionSummary => ({
   appSessionId,
   providerSessionId: `provider-${appSessionId}`,
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',

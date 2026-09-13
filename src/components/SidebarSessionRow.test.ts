@@ -8,6 +8,7 @@ import type { SessionSummary } from '../types/bridge';
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     appSessionId: 'sess-a',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

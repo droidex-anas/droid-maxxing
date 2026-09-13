@@ -353,6 +353,7 @@ function historicalSummary(
     appSessionId,
     providerSessionId,
     compactedFromProviderSessionIds,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

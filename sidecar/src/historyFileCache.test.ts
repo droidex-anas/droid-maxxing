@@ -119,6 +119,7 @@ function patchFor(appSessionId: string, cwd: string): Protocol.SessionSummary {
   return {
     appSessionId,
     providerSessionId: appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

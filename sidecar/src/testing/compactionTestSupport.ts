@@ -11,6 +11,7 @@ export function createCompactionTestLiveSession(
     summary: {
       appSessionId,
       providerSessionId: session.sessionId,
+      provider: 'droid',
       sessionPurpose: 'chat',
       interactionMode: 'auto',
       role: 'user',

@@ -427,6 +427,7 @@ test('a seeded cwd patch is respected before workspace filtering', async () => {
       {
         appSessionId: 'moved-session',
         providerSessionId: 'moved-session',
+        provider: 'droid',
         sessionPurpose: 'chat',
         interactionMode: 'auto',
         role: 'primary',

@@ -20,6 +20,7 @@ function summary(tokensOut: number): SessionSummary {
   return {
     appSessionId: 'app',
     providerSessionId: 'provider',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

@@ -14,6 +14,7 @@ const summary = (
 ): SessionSummary => ({
   appSessionId,
   providerSessionId: appSessionId,
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',

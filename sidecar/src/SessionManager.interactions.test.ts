@@ -92,6 +92,7 @@ function historicalSummary(appSessionId: string, providerSessionId: string): Ses
   return {
     appSessionId,
     providerSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

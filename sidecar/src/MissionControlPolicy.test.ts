@@ -303,6 +303,7 @@ function missionSummary(
     appSessionId: 'parent-app',
     providerSessionId: 'parent-provider',
     missionId: 'mission-1',
+    provider: 'droid',
     sessionPurpose,
     interactionMode,
     role: 'primary',

@@ -12,6 +12,7 @@ import type { GithubAvailability, GitEnvironment } from '../types/vcs.js';
 const session = (overrides: Partial<SessionSummary>): SessionSummary => ({
   appSessionId: 's1',
   providerSessionId: 'provider-s1',
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',
