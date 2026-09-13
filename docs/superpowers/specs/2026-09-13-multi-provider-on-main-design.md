@@ -31,7 +31,7 @@ Droid is the default and behaves exactly as today at every commit in the stack.
 
 ### 3.1 What main already has (do not rebuild it)
 
-Main is already seam-ready in three places the reference branch did not notice, which is why the reference branch is 13.2k lines and this stack is ~2.6k.
+Main is already seam-ready in two places the reference branch did not notice (the provider-agnostic event type and the object-identity stale-turn guard), which is why the reference branch is 13.2k lines and this stack is under 3k.
 
 **Provider identity does not exist yet (corrected 2026-09-13).** An earlier draft of this section claimed `providerKind.ts`, `SessionSummary.provider` and `session.create.provider` were already on main; that was an uncommitted work-in-progress file read from a shared worktree, not main. PR 2 of the stack introduces them: `sidecar/src/providers/providerKind.ts` (`PROVIDER_KINDS = ['droid','claude','codex']`, `DEFAULT_PROVIDER`, `providerKind()`, `requireProviderKind()`, `assertProviderUnchanged()`), a required `SessionSummary.provider: ProviderKind` mirrored into `src/types/bridge.ts`, an optional `session.create.provider`, rejection of a provider change in `session.updateSettings`, and `provider: 'droid'` stamped by every summary builder (`buildCreatedSessionSummary`, `buildResumedSession`, `summarizeSessionFile`, session adoption). No database column: every session on disk today is Droid, and non-Droid sessions persist their binding in their own transcript head line (§3.6).
 
@@ -105,7 +105,8 @@ export interface ProviderSession {
   readonly resumeId?: string;          // only when it differs (Codex threadId)
   readonly capabilities: ProviderCapabilities;
   // The turn. Generator return == settled; throw == failed. No settlement event:
-  // an async generator already *is* the turn lifecycle.
+  // an async generator already *is* the turn lifecycle. Provider-specific stream
+  // options (Droid's `includePartialMessages: true`) live inside the adapter.
   stream(prompt: string): AsyncGenerator<NormalizedEvent, void, undefined>;
   interrupt(): Promise<void>;
   contextStats(): Promise<ContextStatsSnapshot | undefined>;  // undefined when !capabilities.contextStats
