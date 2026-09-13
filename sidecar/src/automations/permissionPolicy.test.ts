@@ -4,7 +4,6 @@ import {
   AUTOMATION_MCP_SERVER_NAME,
   automationPermissionTarget,
   shouldAttachAutomationMcp,
-  shouldAutoApproveAutomationPermission,
   shouldAutoApproveAutomationTool,
 } from './permissionPolicy.js';
 
@@ -63,5 +62,4 @@ test('conflicting explicit and namespaced MCP server names are rejected', () => 
   } as never;
 
   assert.equal(automationPermissionTarget(params), null);
-  assert.equal(shouldAutoApproveAutomationPermission(params, 'high'), false);
 });
