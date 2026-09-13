@@ -46,6 +46,8 @@ function requireSupportedProvider(requested: unknown): ProviderKind {
   return provider;
 }
 
+const boundProvider = (summary: SessionSummary | undefined) => summary?.provider;
+
 async function sessionRuntimeCwd(appCwd: string): Promise<string> {
   if (appCwd) return appCwd;
   const chatCwd = join(droidexUserDataDir(), 'chats');
@@ -278,6 +280,7 @@ export class SessionLifecycle {
     let pendingSession: FactorySession | undefined;
     let pendingLiveSession: LiveSession | undefined;
     try {
+      requireSupportedProvider(boundProvider(historical));
       const mcp = await d.startLocalMcpServers(ref, historical?.cwd);
       pendingMcpServers = mcp.servers;
       const session = await d.runtime.loadSession(providerSessionId, {

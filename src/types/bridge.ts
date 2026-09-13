@@ -18,7 +18,8 @@ export type {
 
 // Which agent runtime a session runs on. Bound once when the session is
 // created and never changed afterwards.
-export type ProviderKind = 'droid' | 'claude' | 'codex';
+export const PROVIDER_KINDS = ['droid', 'claude', 'codex'] as const;
+export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
 export type SessionPhase =
   | 'intake'
