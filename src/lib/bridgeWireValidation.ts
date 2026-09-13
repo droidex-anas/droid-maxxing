@@ -10,6 +10,7 @@ import type {
   StreamFidelity,
 } from '../types/bridge';
 import { isAutomationSnapshot } from '../features/automations/wireValidation';
+import { PROVIDER_KINDS } from '../types/bridge';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
@@ -293,6 +294,7 @@ function isSessionSummary(value: unknown): boolean {
       'autonomy',
       'phase',
     ]) &&
+    (PROVIDER_KINDS as readonly string[]).includes(value.provider as string) &&
     Array.isArray(value.features) &&
     value.features.every(isBridgeFeature) &&
     hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt']) &&
