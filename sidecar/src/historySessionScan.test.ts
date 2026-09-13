@@ -136,7 +136,7 @@ test('a transcript DROIDEX writes for a non-Droid session is enumerated and repl
     createdAt: 1,
     updatedAt: 1,
   };
-  const transcript = new ProviderTranscriptFile(summary);
+  const transcript = new ProviderTranscriptFile(summary.appSessionId, () => summary);
   transcript.appendPrompt('what is here?');
   transcript.append(transcriptEvent(appSessionId, 'text', { text: 'Looking.' }));
   transcript.append(

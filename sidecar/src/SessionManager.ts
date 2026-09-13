@@ -1259,7 +1259,14 @@ export class SessionManager {
   // DROIDEX writes one for it.
   private openProviderTranscript(summary: SessionSummary): void {
     if (summary.provider === DEFAULT_PROVIDER) return;
-    this.timeline.useTranscript(summary.appSessionId, new ProviderTranscriptFile(summary));
+    const appSessionId = summary.appSessionId;
+    this.timeline.useTranscript(
+      appSessionId,
+      new ProviderTranscriptFile(
+        appSessionId,
+        () => this.registry.getLive(appSessionId)?.summary ?? summary,
+      ),
+    );
   }
 
   private async runPrimaryTurn(liveSession: LiveSession, prompt: string): Promise<void> {

@@ -222,8 +222,9 @@ export class SessionLifecycle {
       const liveSession = createLiveSession(summary, session, mcp);
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
-      d.openProviderTranscript(summary);
       d.registry.register(liveSession);
+      // Registered first, so the failed-open path that unregisters also releases it.
+      d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
@@ -323,8 +324,9 @@ export class SessionLifecycle {
       const liveSession = createLiveSession(summary, session, mcp);
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
-      d.openProviderTranscript(summary);
       d.registry.register(liveSession);
+      // Registered first, so the failed-open path that unregisters also releases it.
+      d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({
@@ -565,15 +567,17 @@ export class SessionLifecycle {
       await run(() => {
         d.forgetPendingSettings(liveSession.summary.appSessionId);
       });
+      // Flushes the open stored message, so the file is complete before the
+      // renderer hears the session closed.
+      await run(() => {
+        d.forgetProviderTranscript(liveSession.summary.appSessionId);
+      });
       d.emit({ type: 'session.closed', appSessionId: liveSession.summary.appSessionId });
       await run(() => {
         d.forgetInteractions(liveSession.summary.appSessionId);
       });
       await run(() => {
         d.forgetEventFlow(liveSession.summary.appSessionId);
-      });
-      await run(() => {
-        d.forgetProviderTranscript(liveSession.summary.appSessionId);
       });
     }
     await run(() => d.emitSessionList(closedProviderSessionId));

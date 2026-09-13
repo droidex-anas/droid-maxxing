@@ -338,8 +338,9 @@ export class SessionTimeline {
     let flushError: Error | undefined;
     try {
       this.streaming.endTurn(appSessionId, sourceSessionId);
-      // The settled tail is recorded, so the open stored message is complete.
-      this.transcripts.get(appSessionId)?.flush();
+      // The primary tail is recorded, so its open stored message is complete. A
+      // child's turn settling must not split the parent's message in two.
+      if (sourceSessionId === appSessionId) this.transcripts.get(appSessionId)?.flush();
     } catch (error) {
       flushError =
         error instanceof Error

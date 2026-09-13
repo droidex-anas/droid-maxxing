@@ -40,12 +40,16 @@ export class ProviderTranscriptFile {
   private headWritten = false;
   private promptSeq = 0;
 
-  // Holds the registry's live summary rather than a copy: the head line is
-  // written with the first message, so a session abandoned before its first
-  // turn leaves no file, and a provider that mints its resume handle during
-  // create still gets it onto the head.
-  constructor(private readonly summary: SessionSummary) {
-    this.path = join(providerSessionsDir(), `${summary.appSessionId}.jsonl`);
+  // Reads the summary when it writes rather than holding a copy: the registry
+  // replaces the summary object on every update, and the head line goes out
+  // with the first message, so settings applied before the first send and a
+  // resume handle minted during create both land on it. A session abandoned
+  // before its first turn leaves no file.
+  constructor(
+    appSessionId: string,
+    private readonly summary: () => SessionSummary,
+  ) {
+    this.path = join(providerSessionsDir(), `${appSessionId}.jsonl`);
   }
 
   // A turn's prompt. The renderer already showed it, so it is persisted here
@@ -78,8 +82,8 @@ export class ProviderTranscriptFile {
   flush(): void {
     const message = this.pending;
     if (!message) return;
-    this.pending = null;
     this.writeMessage('assistant', message.blocks, message.id, message.ts);
+    this.pending = null;
   }
 
   private nextPromptId(ts: number): string {
@@ -106,7 +110,7 @@ export class ProviderTranscriptFile {
       mkdirSync(providerSessionsDir(), { recursive: true });
       // A resumed session appends to the transcript it already has: one head
       // line per file, written with the session's first message.
-      if (!existsSync(this.path)) appendFileSync(this.path, serialize(headLine(this.summary)));
+      if (!existsSync(this.path)) appendFileSync(this.path, serialize(headLine(this.summary())));
       this.headWritten = true;
     }
     appendFileSync(this.path, serialize(line));
