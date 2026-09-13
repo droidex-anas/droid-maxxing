@@ -13,6 +13,14 @@ export function droidexUserDataDir(): string {
   );
 }
 
+// Transcripts DROIDEX writes itself, for providers that keep no session file of
+// their own. Beside the profile rather than under ~/.factory because the Droid
+// CLI neither writes nor reads them, and a dev instance launched with its own
+// DROIDEX_USER_DATA_DIR gets its own set.
+export function providerSessionsDir(): string {
+  return join(droidexUserDataDir(), 'provider-sessions');
+}
+
 // Instance-private state that cannot be shared between two running instances:
 // the history index enforces a single-writer lease, so a dev instance launched
 // with DROIDEX_USER_DATA_DIR needs its own copy beside its profile instead of

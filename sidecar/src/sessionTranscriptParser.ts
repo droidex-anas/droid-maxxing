@@ -41,6 +41,10 @@ export interface StoredSessionStart {
   cwd?: string;
   title?: string;
   sessionTitle?: string;
+  // Written only by DROIDEX's own writer for non-Droid providers; a Droid file
+  // carries neither, which is what keeps every existing session reading as Droid.
+  provider?: string;
+  resumeId?: string;
   decompSessionType?: string;
   decompMissionId?: string;
   // Present when this session was spawned by another session's tool call

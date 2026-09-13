@@ -36,9 +36,9 @@ import {
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import { decodeProviderSessionIdList } from './historyProviderIds.js';
-import { DEFAULT_PROVIDER } from './providers/providerKind.js';
+import { DEFAULT_PROVIDER, providerKind } from './providers/providerKind.js';
 import { readSessionFileHead, readSessionStart } from './sessionFileHead.js';
-import { droidexHistoryDir } from './droidexPaths.js';
+import { droidexHistoryDir, providerSessionsDir } from './droidexPaths.js';
 
 interface StoredMissionState {
   missionId?: string;
@@ -1359,11 +1359,13 @@ function shouldIncludeCwd(
   return workspaceCwds.has(cwd);
 }
 
+// Every reader of stored sessions — enumeration, replay, the file cache, the
+// search index, markdown export — bottoms out here. Droid's own files are the
+// first root; the second holds the transcripts DROIDEX writes for providers
+// that keep no file of their own (ProviderTranscriptFile.ts).
 function scanSessionFileTree(): SessionFileScan {
-  const root = join(homedir(), '.factory', 'sessions');
+  const roots = [join(homedir(), '.factory', 'sessions'), providerSessionsDir()];
   const files = new Map<string, SessionFileStat>();
-  if (!existsSync(root)) return { files, isComplete: true };
-
   const settingsMtimes = new Map<string, number>();
   let isComplete = true;
   const walk = (dir: string, depth: number) => {
@@ -1401,7 +1403,7 @@ function scanSessionFileTree(): SessionFileScan {
       }
     }
   };
-  walk(root, 0);
+  for (const root of roots) if (existsSync(root)) walk(root, 0);
   for (const [id, file] of files) {
     file.settingsMtimeMs = settingsMtimes.get(id) ?? null;
   }
@@ -1489,7 +1491,9 @@ function summarizeSessionFile(
       appSessionId: providerSessionId,
       providerSessionId,
       missionId: classification.missionId,
-      provider: DEFAULT_PROVIDER,
+      // A Droid file carries no binding, so it reads as Droid without migration.
+      provider: providerKind(start.provider) ?? DEFAULT_PROVIDER,
+      ...(start.resumeId ? { resumeId: start.resumeId } : {}),
       sessionPurpose: classification.sessionPurpose,
       interactionMode: classification.interactionMode,
       role: classification.role,

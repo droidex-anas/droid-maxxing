@@ -21,6 +21,15 @@ import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 interface TimelineHistory {
   recordEvent(event: TranscriptEvent): void;
 }
+
+// Durable transcript for a session whose provider keeps no session file of its
+// own. Registered per live session by the manager, which owns the provider
+// decision; a Droid session has none and the timeline does nothing for it.
+interface TimelineTranscript {
+  appendPrompt(text: string): void;
+  append(event: TranscriptEvent): void;
+  flush(): void;
+}
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface SessionTimelineLoaders {
@@ -118,6 +127,7 @@ export class SessionTimeline {
   private readonly loaders: SessionTimelineLoaders;
   private readonly streaming: StreamingDeltaCoalescer;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
+  private readonly transcripts = new Map<string, TimelineTranscript>();
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
     this.loaders = dependencies.loaders ?? {
@@ -286,6 +296,23 @@ export class SessionTimeline {
     }
   }
 
+  useTranscript(appSessionId: string, transcript: TimelineTranscript): void {
+    this.transcripts.set(appSessionId, transcript);
+  }
+
+  releaseTranscript(appSessionId: string): void {
+    const transcript = this.transcripts.get(appSessionId);
+    if (!transcript) return;
+    this.transcripts.delete(appSessionId);
+    transcript.flush();
+  }
+
+  // A prompt joins the durable transcript without becoming a live event: the
+  // renderer already rendered it from the send.
+  recordPrompt(appSessionId: string, prompt: string): void {
+    this.transcripts.get(appSessionId)?.appendPrompt(prompt);
+  }
+
   append(event: TranscriptEvent): void {
     // Non-streaming appends (status lines, compaction dividers, replay) must
     // never overtake their own source's buffered delta run.
@@ -311,6 +338,8 @@ export class SessionTimeline {
     let flushError: Error | undefined;
     try {
       this.streaming.endTurn(appSessionId, sourceSessionId);
+      // The settled tail is recorded, so the open stored message is complete.
+      this.transcripts.get(appSessionId)?.flush();
     } catch (error) {
       flushError =
         error instanceof Error
@@ -371,6 +400,8 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
+    // After coalescing, so one stored block is one settled run of output.
+    this.transcripts.get(event.appSessionId)?.append(event);
     this.emitRecordedEvent(event);
   }
 

@@ -3,17 +3,26 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import type { SessionSummary, TranscriptEvent } from './protocol.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 
 const originalHome = process.env.HOME;
+const originalUserDataDir = process.env.DROIDEX_USER_DATA_DIR;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-session-scan-home-'));
 process.env.HOME = home;
+// The scan's second root lives beside the profile, so a profile override in the
+// developer's environment would aim this suite at their real session files.
+delete process.env.DROIDEX_USER_DATA_DIR;
 
 const { loadHistoricalSessions } = await import('./history.js');
+const { parseFullSessionTranscript } = await import('./sessionTranscript.js');
+const { ProviderTranscriptFile } = await import('./providers/ProviderTranscriptFile.js');
+const { providerSessionsDir } = await import('./droidexPaths.js');
 
 test.after(() => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
+  if (originalUserDataDir !== undefined) process.env.DROIDEX_USER_DATA_DIR = originalUserDataDir;
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -99,3 +108,87 @@ test('an unreadable subdirectory is skipped without aborting the scan', () => {
     rmSync(locked, { recursive: true, force: true });
   }
 });
+
+// The one cross-provider contract in this path: what ProviderTranscriptFile
+// writes for a non-Droid session is what the scan admits and the parser
+// replays. Nothing types can check — a drifted head key or content block reads
+// as "the session is missing, and empty when reopened".
+test('a transcript DROIDEX writes for a non-Droid session is enumerated and replays', () => {
+  const appSessionId = 'provider-transcript-scan';
+  const summary: SessionSummary = {
+    appSessionId,
+    provider: 'claude',
+    resumeId: 'thread-abc',
+    sessionPurpose: 'chat',
+    interactionMode: 'auto',
+    role: 'primary',
+    title: 'Claude session',
+    goal: 'Claude session',
+    cwd: '',
+    modelId: 'claude-sonnet-4-5',
+    autonomy: 'medium',
+    phase: 'paused',
+    queuedSends: 0,
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const transcript = new ProviderTranscriptFile(summary);
+  transcript.appendPrompt('what is here?');
+  transcript.append(transcriptEvent(appSessionId, 'text', { text: 'Looking.' }));
+  transcript.append(
+    transcriptEvent(appSessionId, 'tool_call', {
+      toolName: 'Read',
+      toolUseId: 'toolu_1',
+      toolArgs: { path: '.' },
+    }),
+  );
+  transcript.append(
+    transcriptEvent(appSessionId, 'tool_result', { toolUseId: 'toolu_1', text: 'AGENTS.md' }),
+  );
+  transcript.flush();
+
+  const listed = loadHistoricalSessions().find((row) => row.summary.appSessionId === appSessionId);
+  assert.equal(listed?.summary.provider, 'claude');
+  assert.equal(listed?.summary.resumeId, 'thread-abc');
+  // Without a model on the head line the restored session cannot be resumed.
+  assert.equal(listed?.summary.modelId, 'claude-sonnet-4-5');
+  assert.equal(listed?.summary.title, 'Claude session');
+
+  const events = parseFullSessionTranscript(
+    appSessionId,
+    appSessionId,
+    join(providerSessionsDir(), `${appSessionId}.jsonl`),
+    'primary',
+  );
+  assert.deepEqual(
+    events.map((event) => [event.kind, event.author ?? event.text, event.toolUseId]),
+    [
+      ['text', 'user', undefined],
+      ['text', 'Looking.', undefined],
+      ['tool_call', undefined, 'toolu_1'],
+      // The call's id survives, so the renderer pairs the result with its call.
+      ['tool_result', 'AGENTS.md', 'toolu_1'],
+    ],
+  );
+});
+
+function transcriptEvent(
+  appSessionId: string,
+  kind: TranscriptEvent['kind'],
+  extra: Partial<TranscriptEvent>,
+): TranscriptEvent {
+  seq += 1;
+  return {
+    id: `provider-event-${String(seq)}`,
+    appSessionId,
+    sourceSessionId: appSessionId,
+    role: 'primary',
+    ts: 1,
+    kind,
+    ...extra,
+  };
+}

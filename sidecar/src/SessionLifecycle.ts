@@ -119,6 +119,10 @@ export interface SessionLifecycleDependencies {
   applyPendingSessionSettings: (appSessionId: string) => Promise<boolean>;
   runPrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<void>;
   context: Pick<SessionContext, 'refresh' | 'stopPolling' | 'stopSession' | 'forgetSession'>;
+  // Durable transcript for a provider that keeps no session file of its own.
+  // Opened with the live session, released when it closes.
+  openProviderTranscript: (summary: SessionSummary) => void;
+  forgetProviderTranscript: (appSessionId: string) => void;
   forgetInteractions: (appSessionId: string) => void;
   forgetEventFlow: (appSessionId: string) => void;
   forgetMissionControl: (appSessionId: string) => void;
@@ -216,6 +220,7 @@ export class SessionLifecycle {
       const liveSession = createLiveSession(summary, session, mcp);
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
+      d.openProviderTranscript(summary);
       d.registry.register(liveSession);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
@@ -315,6 +320,7 @@ export class SessionLifecycle {
       const liveSession = createLiveSession(summary, session, mcp);
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
+      d.openProviderTranscript(summary);
       d.registry.register(liveSession);
       this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
@@ -563,6 +569,9 @@ export class SessionLifecycle {
       await run(() => {
         d.forgetEventFlow(liveSession.summary.appSessionId);
       });
+      await run(() => {
+        d.forgetProviderTranscript(liveSession.summary.appSessionId);
+      });
     }
     await run(() => d.emitSessionList(closedProviderSessionId));
     if (firstError !== undefined) throw errorFromUnknown(firstError);
@@ -725,6 +734,7 @@ export class SessionLifecycle {
       if (this.dependencies.registry.unregister(liveSession.summary.appSessionId)) {
         this.dependencies.forgetInteractions(liveSession.summary.appSessionId);
         this.dependencies.forgetEventFlow(liveSession.summary.appSessionId);
+        this.dependencies.forgetProviderTranscript(liveSession.summary.appSessionId);
         this.dependencies.forgetMissionControl(liveSession.summary.appSessionId);
         this.dependencies.forgetPendingSettings(liveSession.summary.appSessionId);
       }

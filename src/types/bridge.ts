@@ -120,6 +120,9 @@ export interface SessionSummary {
   missionId?: string;
   // Agent runtime this session is bound to, fixed at creation.
   provider: ProviderKind;
+  // Provider-owned handle for resuming this conversation, when the provider
+  // does not let us pin its session id (Codex threads). Absent for Droid.
+  resumeId?: string;
   sessionPurpose: SessionPurpose;
   interactionMode: SessionInteractionMode;
   role: 'primary' | 'user';
