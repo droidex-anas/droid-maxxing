@@ -234,9 +234,15 @@ export class ClaudeEventMapper {
     return [...missed, this.usage()];
   }
 
+  // A line the session itself has to say: what the CLI is doing before it can
+  // answer, in the row shape every provider's status already uses.
+  statusEvent(text: string): NormalizedEvent {
+    return { transcript: this.transcript('status', { text }) };
+  }
+
   private rateLimit(info: RateLimitInfo): NormalizedEvent[] {
     const refusal = rateLimitRefusal(info);
-    return refusal ? [{ transcript: this.transcript('status', { text: refusal }) }] : [];
+    return refusal ? [this.statusEvent(refusal)] : [];
   }
 
   private toolCall(id: string, name: string, input: unknown): NormalizedEvent {

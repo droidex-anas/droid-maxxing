@@ -47,6 +47,9 @@ export interface ProviderSession {
   readonly resumeId?: string;
   // The live agent process, when the provider runs one, so it can be tracked.
   readonly process?: { pid: number; isAlive(): boolean };
+  // For a runtime that can end outside a turn. Never rejects; a failure carries
+  // its diagnostic, and intentional closure resolves without one.
+  readonly closed?: Promise<Error | undefined>;
   // Returning means the turn settled; throwing means it failed. There is no
   // settlement event.
   stream(prompt: string): AsyncGenerator<NormalizedEvent, void, undefined>;

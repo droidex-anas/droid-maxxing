@@ -15,6 +15,7 @@ import {
   MAPPED_NOTIFICATIONS,
   type CodexTurn,
 } from './codexEvents.js';
+import { CodexStartup } from './codexStartup.js';
 import { TurnStream, turnStartParams } from './codexTurn.js';
 
 export interface CodexSessionInput {
@@ -51,6 +52,11 @@ export class CodexSession implements ProviderSession {
   // to name it with yet.
   private pendingInterrupt = false;
   private readonly prompts: OpenPrompts;
+  private readonly startup = new CodexStartup();
+  // Codex reports its servers in one burst, so the notice is folded to the end
+  // of the tick that carries it and the count is the burst's, not the first
+  // frame's.
+  private startupNoticePending = false;
 
   constructor(input: CodexSessionInput) {
     this.providerSessionId = input.appSessionId;
@@ -113,6 +119,9 @@ export class CodexSession implements ProviderSession {
     this.turn = turn;
     this.pendingInterrupt = false;
     try {
+      // The thread's own startup may still be running behind this turn; what is
+      // left of it is announced now rather than leaving the chat silent.
+      this.announceStartup();
       const started = await this.client.request<{ turn: CodexTurn }>(
         'turn/start',
         turnStartParams(threadId, prompt, {
@@ -186,9 +195,23 @@ export class CodexSession implements ProviderSession {
   private registerHandlers(): void {
     for (const method of MAPPED_NOTIFICATIONS) {
       this.client.onNotification(method, (params) => {
+        // Every `item/` notification is the turn answering; the token-usage one
+        // is accounting and says nothing about progress.
+        if (method.startsWith('item/')) this.startup.itemArrived();
         this.turn?.push(this.mapper.map(method, params));
       });
     }
+    this.client.onNotification('mcpServer/startupStatus/updated', (params) => {
+      this.startup.serverStatus(params);
+      this.announceStartup();
+    });
+    this.client.onNotification('hook/started', () => {
+      this.startup.hookStarted();
+      this.announceStartup();
+    });
+    this.client.onNotification('hook/completed', () => {
+      this.startup.hookCompleted();
+    });
     // Every payload is read through a guard: a notification this build does not
     // recognize must not throw out of the transport's stdout listener.
     this.client.onNotification('turn/started', (params) => {
@@ -224,6 +247,22 @@ export class CodexSession implements ProviderSession {
     const turn = this.turn;
     void this.sendInterrupt(turnId).catch((error: unknown) => {
       if (this.turn === turn) turn?.push([this.mapper.errorEvent(errMsg(error))]);
+    });
+  }
+
+  // Nothing to say outside a turn: there is no transcript for it to land in, and
+  // holding the notice keeps it for the turn that is actually waiting.
+  private announceStartup(): void {
+    if (this.startupNoticePending || !this.turn) return;
+    this.startupNoticePending = true;
+    queueMicrotask(() => {
+      this.startupNoticePending = false;
+      // Reading the notices spends them, so the turn that receives them has to
+      // still be there when the burst settles.
+      const turn = this.turn;
+      if (!turn) return;
+      const notices = this.startup.notices();
+      if (notices.length > 0) turn.push(notices.map((text) => this.mapper.statusEvent(text)));
     });
   }
 

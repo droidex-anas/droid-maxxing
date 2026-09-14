@@ -83,6 +83,8 @@ export interface LiveSession extends LiveTurnState {
   droid?: FactorySession;
   closeMode?: SessionCloseMode;
   closePromise?: Promise<void>;
+  turnPromise?: Promise<void>;
+  providerClosePromise?: Promise<void>;
   mcpServers: LocalMcpResource[];
   // Running MCP handles reused when compaction swaps the provider session.
   mcpConfigs: McpServerConfig[];
@@ -237,6 +239,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       this.subscribeAutomaticCompaction(liveSession);
       d.registry.register(liveSession);
+      this.observeProviderClosure(liveSession);
       // Registered first, so the failed-open path that unregisters also releases it.
       d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, providerSession, mcp.configs);
@@ -259,6 +262,12 @@ export class SessionLifecycle {
     const d = this.dependencies;
     const historical = d.registry.getCanonicalSummary(requestedAppSessionId);
     const appSessionId = historical?.appSessionId ?? requestedAppSessionId;
+    const liveSession = d.registry.getLive(appSessionId);
+    const closing = liveSession?.providerClosePromise ?? liveSession?.closePromise;
+    if (closing) {
+      await closing;
+      if (d.isShutdownStarted()) return false;
+    }
     const pending = this.resumeOperations.get(appSessionId);
     if (pending) return pending;
 
@@ -322,6 +331,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       this.subscribeAutomaticCompaction(liveSession);
       d.registry.register(liveSession);
+      this.observeProviderClosure(liveSession);
       // Registered first, so the failed-open path that unregisters also releases it.
       d.openProviderTranscript(summary);
       this.trackProviderProcess(appSessionId, providerSession, mcp.configs);
@@ -790,6 +800,35 @@ export class SessionLifecycle {
     if (target) this.dependencies.compaction.subscribePrimary(target);
   }
 
+  private observeProviderClosure(liveSession: LiveSession): void {
+    const d = this.dependencies;
+    const session = liveSession.session;
+    const appSessionId = liveSession.summary.appSessionId;
+    const isCurrent = () =>
+      !d.isShutdownStarted() &&
+      d.registry.getLive(appSessionId) === liveSession &&
+      liveSession.session === session &&
+      !liveSession.closeMode;
+    const closeAfterTurn = async (error: Error | undefined): Promise<void> => {
+      const turn = liveSession.turnPromise;
+      // The turn owns its diagnostic and transcript settlement. Wait for it
+      // without taking over its error handling before releasing the runtime.
+      if (turn) await turn.catch(() => undefined);
+      if (!isCurrent()) return;
+      if (error && !turn) d.emitError({ appSessionId, message: error.message });
+      await this.close(appSessionId, 'preserve-pending');
+    };
+    void session.closed
+      ?.then((error) => {
+        if (!isCurrent()) return;
+        liveSession.providerClosePromise = closeAfterTurn(error);
+        return liveSession.providerClosePromise;
+      })
+      .catch((error: unknown) => {
+        d.emitError({ appSessionId, message: `Could not release session: ${errMsg(error)}` });
+      });
+  }
+
   private refreshContext(liveSession: LiveSession): void {
     const target = this.primaryContextTarget(liveSession);
     if (target) void this.dependencies.context.refresh(target);
@@ -799,8 +838,9 @@ export class SessionLifecycle {
     let liveSession = this.dependencies.registry.getLive(appSessionId);
     // A send that lands while the runtime is being released must wait for that
     // close and reopen, not vanish. Retirement makes this window reachable.
-    if (liveSession?.closeMode) {
-      await liveSession.closePromise;
+    const closing = liveSession?.providerClosePromise ?? liveSession?.closePromise;
+    if (closing) {
+      await closing;
       if (this.dependencies.isShutdownStarted()) return undefined;
       liveSession = this.dependencies.registry.getLive(appSessionId);
     }
@@ -892,16 +932,27 @@ export class SessionLifecycle {
         streaming: true,
         queuedSends: liveSession.pendingSends.length,
       });
-      await d.runPrimaryTurn(liveSession, prompt);
+      liveSession.turnPromise = d.runPrimaryTurn(liveSession, prompt);
+      await liveSession.turnPromise;
     } finally {
+      liveSession.turnPromise = undefined;
       liveSession.interruptingForSteer = false;
       liveSession.interrupting = false;
       liveSession.streaming = false;
+      if (liveSession.providerClosePromise) {
+        if (d.registry.getLive(stableAppSessionId) === liveSession)
+          this.publishTurnSettled(liveSession);
+        // The closure observer reports cleanup failures; keep queued sends here
+        // until the runtime can actually be released.
+        await liveSession.providerClosePromise.catch(() => undefined);
+      }
       if (d.isShutdownStarted() || this.shouldDiscardPendingSends(liveSession)) {
         liveSession.pendingSends = [];
-      } else if (!d.registry.getLive(stableAppSessionId)) {
+      } else if (d.registry.getLive(stableAppSessionId) !== liveSession) {
         const queued = liveSession.pendingSends.splice(0);
         if (queued.length > 0) void this.redeliverQueuedSends(stableAppSessionId, queued);
+      } else if (liveSession.providerClosePromise) {
+        this.publishTurnSettled(liveSession);
       } else if (liveSession.autoCompacting) {
         const compactionTarget = this.primaryAutomaticCompactionTarget(liveSession);
         if (compactionTarget) d.compaction.afterTurn(compactionTarget);

@@ -140,6 +140,12 @@ export class CodexEventMapper {
     return { transcript: this.transcript('error', { text: message, isError: true }) };
   }
 
+  // A line the session itself has to say: what the thread is doing before it can
+  // answer, in the row shape every provider's status already uses.
+  statusEvent(text: string): NormalizedEvent {
+    return { transcript: this.transcript('status', { text }) };
+  }
+
   private delta(kind: 'text' | 'thinking', params: DeltaParams | undefined): NormalizedEvent[] {
     if (!params?.delta) return [];
     if (kind === 'text') this.streamed.add(params.itemId);
