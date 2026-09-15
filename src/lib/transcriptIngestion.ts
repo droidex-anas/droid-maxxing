@@ -3,11 +3,12 @@ import type { TranscriptMutationChange } from './transcriptMutation';
 import {
   asChunkedSequence,
   insertChunkedSequence,
+  replaceChunkedSequenceAt,
   replaceChunkedSequenceSuffix,
 } from './chunkedSequence';
 import {
   estimateAppendedTranscriptCost,
-  estimateReplacedTranscriptTailCost,
+  estimateReplacedTranscriptEventCost,
 } from './transcriptWindow';
 import { isChildSessionTool, mergeChildSessionSpawn } from './childSessionEvents';
 
@@ -28,6 +29,10 @@ interface TranscriptIndexes {
   firstUserIndex: number | undefined;
   latestActivityBySource: ReadonlyMap<string, TranscriptEvent>;
   childSpawns: ReadonlyMap<string, TranscriptEvent>;
+  // toolUseId → position of the one stable event a streamed call coalesces
+  // into, so interleaved snapshots of parallel calls merge instead of
+  // duplicating.
+  toolCallIndexByUseId: ReadonlyMap<string, number>;
 }
 
 interface EventIdIndex {
@@ -38,7 +43,7 @@ const EVENT_ID_BUCKET_COUNT = 256;
 const transcriptRuntimes = new WeakMap<readonly TranscriptEvent[], TranscriptRuntime>();
 
 // Streaming delta IDs stay out of the retained index; coalescing does not keep
-// those events (sidecar SessionTimeline mergeStreamingDelta semantics).
+// those events (sidecar streamingDeltaCoalescer.ts mergeStreamingDelta semantics).
 export function ingestTranscriptEvents(
   previous: TranscriptEvent[],
   previousCost: number,
@@ -59,8 +64,9 @@ export function ingestTranscriptEvents(
     if (hasEventId(eventIds, event.id)) continue;
     const last = events.at(-1);
 
-    // Protocol mirror of sidecar/src/SessionTimeline.ts mergeStreamingDelta().
-    // Keep both implementations and their behavior tests synchronized.
+    // Protocol mirror of sidecar/src/streamingDeltaCoalescer.ts
+    // mergeStreamingDelta(). Keep both implementations and their behavior
+    // tests synchronized.
     const textDelta = getTextDeltaRun(last, event);
     if (textDelta) {
       const changedIndex = events.length - 1;
@@ -70,9 +76,9 @@ export function ingestTranscriptEvents(
         endTs: event.endTs ?? event.ts,
       };
       events = replaceChunkedSequenceSuffix(events, changedIndex, [mergedTail]);
-      indexes = replaceIndexedTail(indexes, textDelta.previous, mergedTail);
+      indexes = replaceIndexedEvent(indexes, textDelta.previous, mergedTail);
       recordChange(changedIndex);
-      estimatedCost = estimateReplacedTranscriptTailCost(
+      estimatedCost = estimateReplacedTranscriptEventCost(
         estimatedCost,
         textDelta.previous,
         mergedTail,
@@ -80,22 +86,28 @@ export function ingestTranscriptEvents(
       continue;
     }
 
-    // A tool call streams partial snapshots under one toolUseId. Keep one
-    // stable event and accumulate object fields so renderer and replay match.
-    const toolCallTail = getToolCallTail(last, event);
-    if (toolCallTail) {
-      const changedIndex = events.length - 1;
-      const toolName = event.toolName ?? toolCallTail.toolName;
-      const mergedTail: TranscriptEvent = {
-        ...toolCallTail,
+    // A tool call streams partial snapshots under one toolUseId. Parallel
+    // calls interleave their snapshots, so merge by id wherever the earlier
+    // snapshot landed; merging only at the tail appends duplicate rows whose
+    // missing results then read as running for the whole session. One stable
+    // event per call keeps renderer and replay in agreement.
+    const mergeTarget = toolCallMergeTarget(events, indexes, event);
+    if (mergeTarget) {
+      const toolName = event.toolName ?? mergeTarget.existing.toolName;
+      const mergedCall: TranscriptEvent = {
+        ...mergeTarget.existing,
         ...(toolName !== undefined ? { toolName } : {}),
-        toolArgs: mergeToolArgs(toolCallTail.toolArgs, event.toolArgs),
+        toolArgs: mergeToolArgs(mergeTarget.existing.toolArgs, event.toolArgs),
         endTs: event.endTs ?? event.ts,
       };
-      events = replaceChunkedSequenceSuffix(events, changedIndex, [mergedTail]);
-      indexes = replaceIndexedTail(indexes, toolCallTail, mergedTail);
-      recordChange(changedIndex);
-      estimatedCost = estimateReplacedTranscriptTailCost(estimatedCost, toolCallTail, mergedTail);
+      events = replaceChunkedSequenceAt(events, mergeTarget.index, mergedCall);
+      indexes = replaceIndexedEvent(indexes, mergeTarget.existing, mergedCall);
+      recordChange(mergeTarget.index);
+      estimatedCost = estimateReplacedTranscriptEventCost(
+        estimatedCost,
+        mergeTarget.existing,
+        mergedCall,
+      );
       continue;
     }
 
@@ -187,6 +199,12 @@ export function normalizeTranscriptUpdate(
         insertedIndexes.childSpawns,
         previousRuntime.indexes.childSpawns,
       ),
+      toolCallIndexByUseId: mergeToolCallIndexes(
+        insertedIndexes.toolCallIndexByUseId,
+        previousRuntime.indexes.toolCallIndexByUseId,
+        mutation.firstChangedIndex,
+        mutation.insertedCount,
+      ),
     });
     return events;
   }
@@ -246,6 +264,7 @@ function buildIndexes(events: readonly TranscriptEvent[]): TranscriptIndexes {
     firstUserIndex: undefined,
     latestActivityBySource: new Map(),
     childSpawns: new Map(),
+    toolCallIndexByUseId: new Map(),
   };
   for (let index = 0; index < events.length; index += 1) {
     const event = events.at(index);
@@ -276,10 +295,25 @@ function appendIndexes(
     updated.set(key, existing ? mergeChildSessionSpawn(existing, event) : event);
     childSpawns = updated;
   }
-  return { firstUserEvent, firstUserIndex, latestActivityBySource, childSpawns };
+  let toolCallIndexByUseId = indexes.toolCallIndexByUseId;
+  if (event.kind === 'tool_call' && event.toolUseId) {
+    const updated = new Map(toolCallIndexByUseId);
+    updated.set(event.toolUseId, eventIndex);
+    toolCallIndexByUseId = updated;
+  }
+  return {
+    firstUserEvent,
+    firstUserIndex,
+    latestActivityBySource,
+    childSpawns,
+    toolCallIndexByUseId,
+  };
 }
 
-function replaceIndexedTail(
+// Identity-based swap of one indexed event for its replacement. Position-free:
+// the merge target may sit anywhere in the transcript once parallel tool-call
+// snapshots merge by toolUseId rather than only at the tail.
+function replaceIndexedEvent(
   indexes: TranscriptIndexes,
   previous: TranscriptEvent,
   next: TranscriptEvent,
@@ -324,6 +358,23 @@ function mergeChildSpawnIndexes(
   for (const [key, event] of newer) {
     const existing = merged.get(key);
     merged.set(key, existing ? mergeChildSessionSpawn(existing, event) : event);
+  }
+  return merged;
+}
+
+// Older pages insert before the retained window, so retained positions shift.
+// On a boundary collision the retained (newer) copy stays the merge target.
+function mergeToolCallIndexes(
+  inserted: ReadonlyMap<string, number>,
+  retained: ReadonlyMap<string, number>,
+  insertionIndex: number,
+  insertedCount: number,
+): ReadonlyMap<string, number> {
+  if (inserted.size === 0 && retained.size === 0) return retained;
+  const merged = new Map<string, number>();
+  for (const [id, index] of inserted) merged.set(id, insertionIndex + index);
+  for (const [id, index] of retained) {
+    merged.set(id, index >= insertionIndex ? index + insertedCount : index);
   }
   return merged;
 }
@@ -410,22 +461,22 @@ function getTextDeltaRun(
   return undefined;
 }
 
-function getToolCallTail(
-  previous: TranscriptEvent | undefined,
+// The one earlier snapshot of a streamed call, wherever it landed. The index
+// and the sequence are maintained together; a stale or cross-source hit is
+// treated as no match so the event appends instead of merging into a stranger.
+function toolCallMergeTarget(
+  events: readonly TranscriptEvent[],
+  indexes: TranscriptIndexes,
   next: TranscriptEvent,
-): TranscriptEvent | undefined {
-  if (
-    previous !== undefined &&
-    !next.author &&
-    next.kind === 'tool_call' &&
-    previous.kind === 'tool_call' &&
-    previous.sourceSessionId === next.sourceSessionId &&
-    !!next.toolUseId &&
-    previous.toolUseId === next.toolUseId
-  ) {
-    return previous;
-  }
-  return undefined;
+): { index: number; existing: TranscriptEvent } | undefined {
+  if (next.author || next.kind !== 'tool_call' || !next.toolUseId) return undefined;
+  const index = indexes.toolCallIndexByUseId.get(next.toolUseId);
+  if (index === undefined) return undefined;
+  const existing = events.at(index);
+  if (existing?.kind !== 'tool_call') return undefined;
+  if (existing.toolUseId !== next.toolUseId) return undefined;
+  if (existing.sourceSessionId !== next.sourceSessionId) return undefined;
+  return { index, existing };
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

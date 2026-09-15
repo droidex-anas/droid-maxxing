@@ -68,6 +68,42 @@ export function replaceChunkedSequenceSuffix<T>(
   return createSequence(stateFromChunks([...prefixChunks, ...replacementChunks], state.chunkSize));
 }
 
+// Lengths never change here, so the settled watermark and chunk ends stay
+// valid: only the one owning chunk (or the live chunk) is copied.
+export function replaceChunkedSequenceAt<T>(values: readonly T[], index: number, value: T): T[] {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= values.length) {
+    throw new RangeError('index must be a safe index within the sequence.');
+  }
+  const sequence = resolveChunkedSequence(values);
+  const state = requiredSequenceState(sequence);
+  if (index >= state.settledLength) {
+    const liveChunk = state.liveChunk.slice();
+    liveChunk[index - state.settledLength] = value;
+    return createSequence({ ...state, liveChunk });
+  }
+  let low = 0;
+  let high = state.settledEnds.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const middleEnd = state.settledEnds.at(middle);
+    if (middleEnd === undefined) throw new TypeError('Invalid chunked-sequence index state.');
+    if (index < middleEnd) high = middle;
+    else low = middle + 1;
+  }
+  const chunkStart = low === 0 ? 0 : state.settledEnds.at(low - 1);
+  const chunk = state.settledChunks.at(low)?.slice();
+  if (chunkStart === undefined || !chunk) {
+    throw new TypeError('Invalid chunked-sequence index state.');
+  }
+  chunk[index - chunkStart] = value;
+  const settledChunks = [
+    ...state.settledChunks.slice(0, low),
+    chunk,
+    ...state.settledChunks.slice(low + 1),
+  ];
+  return createSequence({ ...state, settledChunks });
+}
+
 export function insertChunkedSequence<T>(
   values: readonly T[],
   index: number,

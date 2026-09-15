@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TranscriptEvent } from '../types/bridge';
-import { ingestTranscriptEvents, firstUserTranscriptEvent } from './transcriptIngestion';
+import {
+  ingestTranscriptEvents,
+  firstUserTranscriptEvent,
+  normalizeTranscriptUpdate,
+} from './transcriptIngestion';
 import { estimateTranscriptCost } from './transcriptWindow';
 
 function transcriptEvent(id: string, overrides: Partial<TranscriptEvent> = {}): TranscriptEvent {
@@ -110,6 +114,147 @@ test('ingestion merges one streamed tool call and keeps distinct calls separate'
     kind: 'append',
     previousLength: 1,
     firstChangedIndex: 0,
+  });
+  assert.equal(result.estimatedCost, estimateTranscriptCost(result.events));
+});
+
+test('interleaved snapshots of parallel tool calls merge by id instead of duplicating', () => {
+  const callA1 = transcriptEvent('call-a-1', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-a',
+    toolName: 'Bash',
+    toolArgs: { command: 'git branch' },
+  });
+  const callB1 = transcriptEvent('call-b-1', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-b',
+    toolName: 'Read',
+    toolArgs: { path: '/tmp/file' },
+    ts: 2,
+  });
+  const thought = transcriptEvent('thought', {
+    author: undefined,
+    kind: 'thinking',
+    text: 'working',
+    ts: 3,
+  });
+  const seeded = ingestTranscriptEvents([], estimateTranscriptCost([]), [callA1, callB1, thought]);
+
+  const callA2 = transcriptEvent('call-a-2', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-a',
+    toolArgs: { description: 'list branches' },
+    ts: 4,
+  });
+  const callB2 = transcriptEvent('call-b-2', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-b',
+    toolArgs: { line: 12 },
+    ts: 5,
+  });
+  const result = ingestTranscriptEvents(seeded.events, seeded.estimatedCost, [callA2, callB2]);
+
+  assert.equal(result.events.length, 3);
+  assert.deepEqual(result.events[0], {
+    ...callA1,
+    toolArgs: { command: 'git branch', description: 'list branches' },
+    endTs: 4,
+  });
+  assert.deepEqual(result.events[1], {
+    ...callB1,
+    toolArgs: { path: '/tmp/file', line: 12 },
+    endTs: 5,
+  });
+  assert.equal(result.events[2], thought);
+  assert.deepEqual(result.change, {
+    kind: 'append',
+    previousLength: 3,
+    firstChangedIndex: 0,
+  });
+  assert.equal(result.estimatedCost, estimateTranscriptCost(result.events));
+});
+
+test('a tool-call snapshot never merges into another source\u2019s call', () => {
+  const call = transcriptEvent('call-1', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-a',
+    toolName: 'Bash',
+    toolArgs: { command: 'git branch' },
+  });
+  const seeded = ingestTranscriptEvents([], estimateTranscriptCost([]), [call]);
+
+  const foreign = transcriptEvent('call-foreign', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    sourceSessionId: 'child-1',
+    toolUseId: 'tool-use-a',
+    toolName: 'Bash',
+    toolArgs: { command: 'git status' },
+    ts: 2,
+  });
+  const result = ingestTranscriptEvents(seeded.events, seeded.estimatedCost, [foreign]);
+
+  assert.deepEqual(result.events, [call, foreign]);
+  assert.deepEqual(result.change, {
+    kind: 'append',
+    previousLength: 1,
+    firstChangedIndex: 1,
+  });
+});
+
+test('a prepended history page shifts streamed tool-call merge targets', () => {
+  const call = transcriptEvent('call-1', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-a',
+    toolName: 'Bash',
+    toolArgs: { command: 'git log' },
+  });
+  const tail = transcriptEvent('tail', { ts: 2 });
+  const seeded = ingestTranscriptEvents([], estimateTranscriptCost([]), [call, tail]);
+
+  const older = transcriptEvent('older', { ts: 0 });
+  const normalized = normalizeTranscriptUpdate(seeded.events, [older, ...seeded.events], {
+    kind: 'prepend',
+    previousLength: 2,
+    firstChangedIndex: 0,
+    insertedCount: 1,
+  });
+
+  const snapshot = transcriptEvent('call-1-later', {
+    author: undefined,
+    kind: 'tool_call',
+    text: undefined,
+    toolUseId: 'tool-use-a',
+    toolArgs: { description: 'later args' },
+    ts: 3,
+  });
+  const result = ingestTranscriptEvents(normalized, estimateTranscriptCost(normalized), [snapshot]);
+
+  assert.equal(result.events.length, 3);
+  assert.equal(result.events[0], older);
+  assert.deepEqual(result.events[1], {
+    ...call,
+    toolArgs: { command: 'git log', description: 'later args' },
+    endTs: 3,
+  });
+  assert.equal(result.events[2], tail);
+  assert.deepEqual(result.change, {
+    kind: 'append',
+    previousLength: 3,
+    firstChangedIndex: 1,
   });
   assert.equal(result.estimatedCost, estimateTranscriptCost(result.events));
 });

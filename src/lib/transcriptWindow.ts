@@ -128,13 +128,15 @@ export function estimateAppendedTranscriptCost(
   return previousCost + SCALAR_OVERHEAD + estimateTranscriptEventCost(event);
 }
 
-export function estimateReplacedTranscriptTailCost(
+export function estimateReplacedTranscriptEventCost(
   previousCost: number,
-  previousTail: TranscriptEvent,
-  nextTail: TranscriptEvent,
+  previousEvent: TranscriptEvent,
+  nextEvent: TranscriptEvent,
 ): number {
   return (
-    previousCost - estimateTranscriptEventCost(previousTail) + estimateTranscriptEventCost(nextTail)
+    previousCost -
+    estimateTranscriptEventCost(previousEvent) +
+    estimateTranscriptEventCost(nextEvent)
   );
 }
 
