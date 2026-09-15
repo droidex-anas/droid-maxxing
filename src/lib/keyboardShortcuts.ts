@@ -8,16 +8,24 @@ export function isTerminalTabShortcut(event: Pick<KeyboardEvent, 'ctrlKey' | 'ke
   return event.ctrlKey && event.key === '`';
 }
 
-export function isTerminalInputTarget(target: EventTarget | null): boolean {
+function targetWithin(target: EventTarget | null, selector: string): boolean {
   if (!target || typeof target !== 'object') return false;
   const closest = (target as { closest?: (selector: string) => unknown }).closest;
-  return typeof closest === 'function' && Boolean(closest.call(target, '[data-terminal-input]'));
+  return typeof closest === 'function' && Boolean(closest.call(target, selector));
+}
+
+export function isTerminalInputTarget(target: EventTarget | null): boolean {
+  return targetWithin(target, '[data-terminal-input]');
 }
 
 export function isSpecOutlineFindTarget(target: EventTarget | null): boolean {
-  if (!target || typeof target !== 'object') return false;
-  const closest = (target as { closest?: (selector: string) => unknown }).closest;
-  return typeof closest === 'function' && Boolean(closest.call(target, '[data-spec-outline]'));
+  return targetWithin(target, '[data-spec-outline]');
+}
+
+// The docked spec reader owns Cmd/Ctrl+F (its outline jump menu) whenever the
+// event originates inside the reader, so transcript find stays out of the way.
+export function isSpecReaderFindTarget(target: EventTarget | null): boolean {
+  return targetWithin(target, '[data-spec-reader]');
 }
 
 // Cmd/Ctrl+F without Shift. Shift+Cmd/Ctrl+F already opens the Files pane.
@@ -41,6 +49,7 @@ export function shouldOpenTranscriptFind(
   specOutlineOpen: boolean,
 ): boolean {
   if (!isTranscriptFindShortcut(event)) return false;
-  if (isTerminalInputTarget(target) || isSpecOutlineFindTarget(target)) return false;
+  if (isTerminalInputTarget(target)) return false;
+  if (isSpecOutlineFindTarget(target) || isSpecReaderFindTarget(target)) return false;
   return !specOutlineOpen;
 }

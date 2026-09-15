@@ -229,7 +229,7 @@ export default function RightPanel() {
             </div>
           )}
 
-          {/* Spec — opens the full wiki reader for sessions that produced one */}
+          {/* Spec — opens the docked reader pane for sessions that produced one */}
           {activeSession && activeSpec && (
             <div>
               <Divider />
@@ -239,7 +239,7 @@ export default function RightPanel() {
                 label={specTitle || 'Open spec'}
                 title={specTitle || undefined}
                 onClick={() => {
-                  dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeSession.appSessionId });
+                  dispatch({ type: 'SPEC_OPEN_READER', appSessionId: activeSession.appSessionId });
                 }}
                 trailing={
                   <ChevronRight className="h-3.5 w-3.5 text-droid-text-muted/60 transition-colors group-hover:text-droid-text-secondary" />

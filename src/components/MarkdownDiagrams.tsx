@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Mermaid } from 'mermaid';
 
 import { useVisibleOnce } from '../hooks/useVisibleOnce';
@@ -47,6 +47,22 @@ function sanitizeMermaid(src: string): string {
     .join('\n');
 }
 
+// Every rendered diagram (mermaid, fenced or inline SVG) sits on a soft
+// elevated wash with balanced breathing room — no header bar or border, the
+// drawing is the content. `source` (a diagram that failed to render) shows
+// the fenced code left-aligned instead.
+function DiagramFrame({ source, children }: { source?: boolean; children: ReactNode }) {
+  return (
+    <figure
+      className={`my-4 overflow-hidden rounded-2xl bg-droid-elevated/25 px-6 py-7 ${
+        source ? '' : 'flex items-center justify-center'
+      }`}
+    >
+      {children}
+    </figure>
+  );
+}
+
 export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -81,75 +97,64 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
     };
   }, [code, visible]);
 
-  if (error) {
-    return (
-      <div
-        ref={hostRef}
-        className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
-      >
-        <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-          <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
-            Diagram source
-          </span>
-          <span className="text-[11px] font-mono text-droid-text-muted/40">Mermaid</span>
-        </div>
-        <pre className="overflow-x-auto p-4">
-          <code className="font-mono text-[12px] text-droid-text-secondary whitespace-pre">
-            {code}
-          </code>
-        </pre>
-      </div>
-    );
-  }
-
   return (
-    <div
-      ref={hostRef}
-      className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
-    >
-      <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-        <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
-          Diagram
-        </span>
-        <span className="text-[11px] font-mono text-droid-text-muted/40">Mermaid</span>
-      </div>
-      <div
-        className="p-4 flex items-center justify-center [&_svg]:max-w-full [&_svg]:h-auto"
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+    <div ref={hostRef}>
+      {error ? (
+        <DiagramFrame source>
+          <pre className="w-full overflow-x-auto">
+            <code className="font-mono text-[12px] whitespace-pre text-droid-text-secondary">
+              {code}
+            </code>
+          </pre>
+        </DiagramFrame>
+      ) : (
+        <DiagramFrame>
+          <div
+            className="flex w-full items-center justify-center [&_svg]:h-auto [&_svg]:max-w-full"
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </DiagramFrame>
+      )}
     </div>
   );
 });
 
-/* ── SVG code block renderer ── */
+/* ── SVG diagram renderer (fenced ```svg blocks and inline <svg> markup) ── */
+
+// The diagram should scale to its container, but only the ROOT element's fixed
+// dimensions may change — blanket-stripping width/height would destroy the
+// geometry of every rect/circle inside. When the root has pixel dimensions but
+// no viewBox, synthesize one so the drawing scales proportionally.
+function scaleRootSvg(raw: string): string {
+  return raw.replace(/<svg\b[^>]*>/i, (tag) => {
+    const width = /\bwidth="(\d+)(?:px)?"/i.exec(tag)?.[1];
+    const height = /\bheight="(\d+)(?:px)?"/i.exec(tag)?.[1];
+    let next = tag.replace(/\s(?:width|height)="\d+(?:px)?"/gi, '');
+    if (!/\bviewBox=/i.test(next) && width && height) {
+      next = next.replace(/<svg\b/i, `<svg viewBox="0 0 ${width} ${height}"`);
+    }
+    if (!/\bxmlns=/i.test(next)) {
+      next = next.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    return next.replace(/<svg\b/i, '<svg width="100%"');
+  });
+}
+
 export function SvgCodeBlock({ content }: { content: string }) {
   const safeSvg = useMemo(() => {
     let raw = content.trim();
     if (!raw.startsWith('<svg')) {
       raw = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="100%">${raw}</svg>`;
     }
-    raw = raw.replace(/width="\d+(?:px)?"/gi, 'width="100%"');
-    raw = raw.replace(/height="\d+(?:px)?"/gi, '');
-    if (!raw.includes('xmlns=')) {
-      raw = raw.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    }
-    return raw;
+    return scaleRootSvg(raw);
   }, [content]);
 
   return (
-    <div className="rounded-2xl border border-droid-border bg-droid-elevated/30 overflow-hidden my-4">
-      <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-        <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
-          Diagram
-        </span>
-        <span className="text-[11px] font-mono text-droid-text-muted/40">SVG</span>
-      </div>
-      <div className="p-4 flex items-center justify-center min-h-[100px]">
-        <div
-          className="w-full flex items-center justify-center [&_svg]:max-w-full [&_svg]:h-auto [&_svg]:block"
-          dangerouslySetInnerHTML={{ __html: safeSvg }}
-        />
-      </div>
-    </div>
+    <DiagramFrame>
+      <div
+        className="flex w-full items-center justify-center [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-full"
+        dangerouslySetInnerHTML={{ __html: safeSvg }}
+      />
+    </DiagramFrame>
   );
 }

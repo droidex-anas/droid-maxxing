@@ -10,7 +10,6 @@ const SETTINGS_HOST_SOURCE = readFileSync('src/components/SettingsLazyHost.tsx',
 const OPTIONAL_SURFACE_IMPORTS = [
   './components/SettingsPanel',
   './components/CommandPalette',
-  './components/SpecWikiModal',
   './components/onboarding/OnboardingWizard',
   './components/MissionControl',
   './features/pull-requests/PullRequestsView',
@@ -54,7 +53,4 @@ test('animation boundaries keep motion outside Suspense where exit must run', ()
     HOST_SOURCE,
     /<motion\.div[\s\S]*exit=\{\{ opacity: 0 \}\}[\s\S]*<Suspense fallback=\{<OnboardingSkeleton \/>}>/,
   );
-
-  // Spec wiki keeps its modal AnimatePresence inside the always-mounted lazy surface.
-  assert.match(APP_SOURCE, /<Suspense fallback=\{null\}>\s*<LazySpecWikiModal \/>/);
 });

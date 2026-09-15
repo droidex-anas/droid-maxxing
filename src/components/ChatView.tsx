@@ -465,8 +465,8 @@ export default function ChatView({
     return '';
   }, [hadSpec, hasFileSpec, fileSpec, capturedPlan, storedSpec]);
 
-  // Persist the best spec we have so the card, wiki reader, and right-panel
-  // button survive exiting spec mode and switching between sessions.
+  // Persist the best spec we have so the preview card, reader pane, and
+  // right-panel button survive exiting spec mode and switching sessions.
   useEffect(() => {
     if (!activeAppSessionId || !specContent) return;
     const title = /^#{1,3}\s+(.+)$/m.exec(specContent)?.[1]?.trim() ?? 'Specification';
@@ -567,9 +567,9 @@ export default function ChatView({
         ...(stopSelectedChild !== undefined ? { onStop: stopSelectedChild } : {}),
       }
     : undefined;
-  const openSpecWiki = activeAppSessionId
+  const openSpecReader = activeAppSessionId
     ? () => {
-        dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeAppSessionId });
+        dispatch({ type: 'SPEC_OPEN_READER', appSessionId: activeAppSessionId });
       }
     : undefined;
 
@@ -636,7 +636,7 @@ export default function ChatView({
             specContent={specContent}
             density={toolActivity.density}
             inlineDiffs={toolActivity.inlineDiffs}
-            {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
+            {...(openSpecReader !== undefined ? { onOpenSpecReader: openSpecReader } : {})}
             {...(!viewingChildSession && createdWorktreePath !== undefined
               ? { createdWorktreePath }
               : {})}

@@ -5,7 +5,6 @@ import { PanelSkeleton, UtilityPaneSkeleton } from '../components/skeletons/Work
 export const LAZY_SURFACE_LOADERS = {
   settings: () => import('../components/SettingsPanel'),
   commandPalette: () => import('../components/CommandPalette'),
-  specWiki: () => import('../components/SpecWikiModal'),
   onboarding: () => import('../components/onboarding/OnboardingWizard'),
   missionControl: () => import('../components/MissionControl'),
   pullRequests: async () => {
@@ -38,7 +37,6 @@ export type LazySurface = keyof typeof LAZY_SURFACE_LOADERS;
 
 export const LazySettingsPanel = lazy(LAZY_SURFACE_LOADERS.settings);
 export const LazyCommandPalette = lazy(LAZY_SURFACE_LOADERS.commandPalette);
-export const LazySpecWikiModal = lazy(LAZY_SURFACE_LOADERS.specWiki);
 export const LazyOnboardingWizard = lazy(LAZY_SURFACE_LOADERS.onboarding);
 export const LazyMissionControl = lazy(LAZY_SURFACE_LOADERS.missionControl);
 export const LazyPullRequestsView = lazy(LAZY_SURFACE_LOADERS.pullRequests);

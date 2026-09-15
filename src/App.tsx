@@ -79,10 +79,10 @@ import {
   LazyMissionControl,
   LazyPullRequestsView,
   LazyReviewPanel,
-  LazySpecWikiModal,
   LazyTerminalWorkspace,
   utilityToolFallback,
 } from './lib/lazySurfaces';
+import SpecReaderPanel from './components/SpecReaderPanel';
 import { noteComposerNotApplicable, noteFirstMeaningfulShellPaint } from './lib/rendererPerf';
 
 function ContextListIcon({ className }: { className?: string }) {
@@ -141,6 +141,7 @@ export default function App() {
       historyLoaded: current.historyLoaded,
       mainView: current.mainView,
       rightPanelOpen: current.rightPanelOpen,
+      specReaderAppSessionId: current.specReaderAppSessionId,
       selectedChild: current.selectedChild,
       sessionRestore: current.sessionRestore,
       settingsOpen: current.settingsOpen,
@@ -223,11 +224,23 @@ export default function App() {
   // The context toggle is meaningful in Mission Control (always) and in a normal
   // chat only after it has content; otherwise there is nothing to open.
   const canToggleContext = isMissionControlView || hasSessionContent;
+  // The spec reader docks beside the conversation, only for the session it was
+  // opened in — switching chats leaves it behind rather than carrying it over.
+  const specReaderVisible =
+    !!activeSession &&
+    !isMissionControlView &&
+    !fullContentRoute &&
+    state.specReaderAppSessionId === activeSession.appSessionId;
   // The context panel floats *over* the chat as an overlay (it does not shrink
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.
   const rightPanelVisible =
-    !focused && !fullContentRoute && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
+    !focused &&
+    !fullContentRoute &&
+    !showUtilityPane &&
+    !specReaderVisible &&
+    state.rightPanelOpen &&
+    hasSessionContent;
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
@@ -703,10 +716,20 @@ export default function App() {
                   </Suspense>
                 </motion.div>
               ) : (
-                <>
-                  <ChatView rightInset={rightPanelVisible} isObscured={browserExpanded} />
-                  <PromptInput rightInset={rightPanelVisible} />
-                </>
+                <div className="flex min-h-0 min-w-0 flex-1">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <ChatView rightInset={rightPanelVisible} isObscured={browserExpanded} />
+                    <PromptInput rightInset={rightPanelVisible} />
+                  </div>
+                  <AnimatePresence initial={false}>
+                    {specReaderVisible && (
+                      <SpecReaderPanel
+                        key="spec-reader"
+                        appSessionId={activeSession.appSessionId}
+                      />
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
             </section>
 
@@ -950,9 +973,6 @@ export default function App() {
           <LazyCommandPalette />
         </Suspense>
       )}
-      <Suspense fallback={null}>
-        <LazySpecWikiModal />
-      </Suspense>
       <Toaster />
 
       <AnimatePresence>{state.settingsOpen && <SettingsLazyHost />}</AnimatePresence>

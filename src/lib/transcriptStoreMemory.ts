@@ -314,9 +314,9 @@ export function pruneRemovedSessionState(
   state: AppState,
   retainedSessionIds: ReadonlySet<string>,
 ): AppState {
-  const specWikiAppSessionId =
-    state.specWikiAppSessionId && retainedSessionIds.has(state.specWikiAppSessionId)
-      ? state.specWikiAppSessionId
+  const specReaderAppSessionId =
+    state.specReaderAppSessionId && retainedSessionIds.has(state.specReaderAppSessionId)
+      ? state.specReaderAppSessionId
       : null;
   const reviewOpenAppSessionId =
     state.reviewOpenAppSessionId && retainedSessionIds.has(state.reviewOpenAppSessionId)
@@ -347,7 +347,7 @@ export function pruneRemovedSessionState(
     },
     specPlans: pruneSessionRecord(state.specPlans, retainedSessionIds),
     sessionSpecs: pruneSessionRecord(state.sessionSpecs, retainedSessionIds),
-    specWikiAppSessionId,
+    specReaderAppSessionId,
     promptQueue: pruneSessionRecord(state.promptQueue, retainedSessionIds),
     sessionNotes: pruneSessionRecord(state.sessionNotes, retainedSessionIds),
     utilityPanels: pruneSessionRecord(state.utilityPanels, retainedSessionIds),

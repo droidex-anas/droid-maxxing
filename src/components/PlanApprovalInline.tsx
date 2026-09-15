@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission, sendToSession, sendToSessionNow } from '../lib/commands';
-import type { Autonomy, PermissionOutcome } from '../types/bridge';
+import type { Autonomy, PermissionOutcome, PermissionRequest } from '../types/bridge';
 import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
 import { inlineCardMotion } from './inlineCardMotion';
 
@@ -15,29 +15,22 @@ const AUTONOMY: { value: Autonomy; label: string; outcome: PermissionOutcome }[]
   { value: 'high', label: 'High', outcome: 'proceed_auto_run_high' },
 ];
 
-// Bottom approval bar shown when a spec (exit_spec_mode) or mission plan
-// (propose_mission) is ready. Replaces the old full-screen popover: the plan
-// itself lives in the inline chat card / wiki reader, this only drives the
-// decision (implement vs keep iterating) plus an optional steered comment.
-export default function PlanApprovalInline() {
+// The spec/plan decision form: an optional steered comment, the autonomy
+// picker (specs only), and the implement vs keep-iterating buttons. Shared by
+// the inline approval bar and the spec reader pane's footer, which are two
+// surfaces over the same pending request.
+export function SpecDecisionForm({ req }: { req: PermissionRequest }) {
   const dispatch = useStoreDispatch();
-  const reduceMotion = useReducedMotion();
   const { downloading: appUpdateInstalling } = useAppUpdate();
-  // Plan approvals are session-scoped: only surface the one belonging to the
-  // chat the user is looking at.
-  const state = useStoreSelector(
-    (current) => ({
-      activeAppSessionId: current.activeAppSessionId,
-      pendingPermissions: current.pendingPermissions,
-    }),
-    shallowEqual,
-  );
-  const activeId = state.activeAppSessionId;
-  const req = activeId ? state.pendingPermissions[activeId] : undefined;
+  const isSpec = req.kind === 'spec';
   const [autonomy, setAutonomy] = useState<Autonomy>('high');
   const [comment, setComment] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const autonomyRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const requestId = req.requestId;
+  useEffect(() => {
+    setComment('');
+  }, [requestId]);
 
   // Radio-group keyboard contract: only the checked option is a tab stop and
   // the arrow keys move focus and selection together.
@@ -51,14 +44,6 @@ export default function PlanApprovalInline() {
     autonomyRefs.current[nextIndex]?.focus();
   };
 
-  const requestId = req?.requestId;
-  useEffect(() => {
-    setComment('');
-  }, [requestId]);
-
-  if (!req || (req.kind !== 'spec' && req.kind !== 'mission_plan')) return null;
-
-  const isSpec = req.kind === 'spec';
   const text = comment.trim();
 
   const finish = () => {
@@ -95,8 +80,121 @@ export default function PlanApprovalInline() {
     finish();
   };
 
-  const openWiki = () => {
-    dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: req.appSessionId });
+  return (
+    <div>
+      <div className="px-4 pb-3">
+        <textarea
+          value={comment}
+          onChange={(e) => {
+            setComment(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            // During IME composition Enter confirms the composed text;
+            // only trigger implement once composition has ended.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              implement();
+            }
+          }}
+          rows={1}
+          placeholder={
+            isSpec
+              ? 'Add a comment to guide implementation (optional)…'
+              : 'Add a comment (optional)…'
+          }
+          className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed text-droid-text outline-none placeholder:text-droid-text-muted focus:border-droid-border-hover"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-3.5">
+        {isSpec && (
+          <div
+            role="radiogroup"
+            aria-label="Implementation autonomy"
+            className="flex items-center gap-0.5 rounded-full border border-droid-border p-0.5"
+          >
+            {AUTONOMY.map((a, i) => {
+              const active = autonomy === a.value;
+              return (
+                <button
+                  key={a.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  tabIndex={active ? 0 : -1}
+                  ref={(el) => {
+                    autonomyRefs.current[i] = el;
+                  }}
+                  onClick={() => {
+                    setAutonomy(a.value);
+                  }}
+                  onKeyDown={(e) => {
+                    onAutonomyKeyDown(e, i);
+                  }}
+                  title={`Implement with ${a.label.toLowerCase()} autonomy`}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    active ? 'text-droid-bg' : 'text-droid-text-secondary hover:text-droid-text'
+                  }`}
+                  style={active ? { background: ACCENT } : undefined}
+                >
+                  {a.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={iterate}
+          disabled={appUpdateInstalling}
+          title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+          className="rounded-full px-3.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors enabled:hover:bg-droid-surface enabled:hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Keep iterating
+        </button>
+        <button
+          type="button"
+          onClick={implement}
+          disabled={appUpdateInstalling}
+          title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+          className="rounded-full px-4 py-1.5 text-[12px] font-semibold text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ background: ACCENT }}
+        >
+          {text ? 'Implement with comment' : 'Implement'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Bottom approval bar shown when a spec (exit_spec_mode) or mission plan
+// (propose_mission) is ready. The plan itself lives in the inline preview card
+// / reader pane; this bar only surfaces the decision. While the reader pane is
+// open for the session it hosts the decision instead, so the bar steps aside.
+export default function PlanApprovalInline() {
+  const dispatch = useStoreDispatch();
+  const reduceMotion = useReducedMotion();
+  // Plan approvals are session-scoped: only surface the one belonging to the
+  // chat the user is looking at.
+  const state = useStoreSelector(
+    (current) => ({
+      activeAppSessionId: current.activeAppSessionId,
+      pendingPermissions: current.pendingPermissions,
+      specReaderAppSessionId: current.specReaderAppSessionId,
+    }),
+    shallowEqual,
+  );
+  const activeId = state.activeAppSessionId;
+  const req = activeId ? state.pendingPermissions[activeId] : undefined;
+
+  if (!req || (req.kind !== 'spec' && req.kind !== 'mission_plan')) return null;
+  if (state.specReaderAppSessionId === req.appSessionId) return null;
+
+  const isSpec = req.kind === 'spec';
+
+  const openReader = () => {
+    dispatch({ type: 'SPEC_OPEN_READER', appSessionId: req.appSessionId });
   };
 
   return (
@@ -117,7 +215,7 @@ export default function PlanApprovalInline() {
           </span>
           <button
             type="button"
-            onClick={openWiki}
+            onClick={openReader}
             className="flex shrink-0 items-center gap-0.5 rounded-full px-2 py-1 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-surface hover:text-droid-text"
           >
             {isSpec ? 'Read spec' : 'Read plan'}
@@ -125,89 +223,7 @@ export default function PlanApprovalInline() {
           </button>
         </div>
 
-        <div className="px-4 pb-3">
-          <textarea
-            ref={inputRef}
-            value={comment}
-            onChange={(e) => {
-              setComment(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              // During IME composition Enter confirms the composed text;
-              // only trigger implement once composition has ended.
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                implement();
-              }
-            }}
-            rows={1}
-            placeholder={
-              isSpec
-                ? 'Add a comment to guide implementation (optional)…'
-                : 'Add a comment (optional)…'
-            }
-            className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed text-droid-text placeholder:text-droid-text-muted outline-none focus:border-droid-border-hover"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-3.5">
-          {isSpec && (
-            <div
-              role="radiogroup"
-              aria-label="Implementation autonomy"
-              className="flex items-center gap-0.5 rounded-full border border-droid-border p-0.5"
-            >
-              {AUTONOMY.map((a, i) => {
-                const active = autonomy === a.value;
-                return (
-                  <button
-                    key={a.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    tabIndex={active ? 0 : -1}
-                    ref={(el) => {
-                      autonomyRefs.current[i] = el;
-                    }}
-                    onClick={() => {
-                      setAutonomy(a.value);
-                    }}
-                    onKeyDown={(e) => {
-                      onAutonomyKeyDown(e, i);
-                    }}
-                    title={`Implement with ${a.label.toLowerCase()} autonomy`}
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                      active ? 'text-droid-bg' : 'text-droid-text-secondary hover:text-droid-text'
-                    }`}
-                    style={active ? { background: ACCENT } : undefined}
-                  >
-                    {a.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className="flex-1" />
-          <button
-            type="button"
-            onClick={iterate}
-            disabled={appUpdateInstalling}
-            title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
-            className="rounded-full px-3.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors enabled:hover:bg-droid-surface enabled:hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Keep iterating
-          </button>
-          <button
-            type="button"
-            onClick={implement}
-            disabled={appUpdateInstalling}
-            title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
-            className="rounded-full px-4 py-1.5 text-[12px] font-semibold text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ background: ACCENT }}
-          >
-            {text ? 'Implement with comment' : 'Implement'}
-          </button>
-        </div>
+        <SpecDecisionForm req={req} />
       </motion.div>
     </AnimatePresence>
   );

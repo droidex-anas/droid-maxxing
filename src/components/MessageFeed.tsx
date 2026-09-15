@@ -1,17 +1,6 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from 'react';
 import type { TranscriptEvent } from '../types/bridge';
-import { SpecRenderer } from './SpecRenderer';
+import { SpecPreviewCard } from './SpecPreviewCard';
 import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import { ProseFileLinks } from './transcript/ProseFileLink';
@@ -45,68 +34,6 @@ import { FeedItemView, feedItemPropsEqual, isSpecEcho } from './chat';
 import { WorkingIndicator } from './transcript/primitives';
 import type { SubagentsDockData } from './SubagentsDock';
 
-/* ── Collapsed spec card shown inline in chat (chevron to expand) ── */
-const InlineSpecCard = memo(function InlineSpecCard({
-  content,
-  onOpenWiki,
-}: {
-  content: string;
-  onOpenWiki?: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const title = useMemo(
-    () => /^#{1,3}\s+(.+)$/m.exec(content)?.[1]?.trim() ?? 'Specification',
-    [content],
-  );
-  const sections = useMemo(() => (content.match(/^#{1,3}\s+/gm) ?? []).length, [content]);
-
-  return (
-    <div className="rounded-xl border border-droid-border bg-droid-elevated/20 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2.5">
-        <button
-          onClick={() => {
-            setExpanded((e) => !e);
-          }}
-          aria-expanded={expanded}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left group"
-        >
-          <ChevronRight
-            className={`w-4 h-4 shrink-0 text-droid-text-muted transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
-          />
-          <span className="truncate text-[13px] font-medium text-droid-text">{title}</span>
-          {sections > 0 && (
-            <span className="shrink-0 text-[11px] tabular-nums text-droid-text-muted/70">
-              {sections} sections
-            </span>
-          )}
-        </button>
-        {onOpenWiki && (
-          <button
-            onClick={onOpenWiki}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-droid-text-secondary bg-droid-elevated/50 border border-droid-border hover:bg-droid-elevated/80 hover:text-droid-text transition-colors"
-          >
-            Read spec
-          </button>
-        )}
-      </div>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12, ease: 'linear' }}
-          >
-            <div className="px-4 pb-4 pt-2 border-t border-droid-border">
-              <SpecRenderer content={content} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-});
-
 /* ── The activity feed (list only; parent owns the scroll container) ── */
 export function MessageFeed({
   events,
@@ -119,7 +46,7 @@ export function MessageFeed({
   childSessionActivity,
   subagentsDock,
   specContent,
-  onOpenSpecWiki,
+  onOpenSpecReader,
   createdWorktreePath,
   onMountedRowsChange,
   scrollElementRef,
@@ -143,7 +70,7 @@ export function MessageFeed({
   // replaced by one grouping subagents dock at the first spawn's position.
   subagentsDock?: SubagentsDockData;
   specContent?: string;
-  onOpenSpecWiki?: () => void;
+  onOpenSpecReader?: () => void;
   createdWorktreePath?: string;
   onMountedRowsChange?: (count: number) => void;
   scrollElementRef?: RefObject<HTMLElement | null>;
@@ -371,7 +298,7 @@ export function MessageFeed({
       <div className="space-y-4">
         {showSpecCard && (
           <div className="mx-auto min-w-0 max-w-2xl">
-            <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+            <SpecPreviewCard content={specContent ?? ''} onOpenReader={onOpenSpecReader} />
           </div>
         )}
 

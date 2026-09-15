@@ -253,10 +253,10 @@ export interface AppState {
   };
   specPlans: Record<string, string>; // latest ExitSpecMode plan per session
   // Persisted spec per session (file path + rendered content). Survives exiting
-  // spec mode so the inline card, mermaid, and the wiki reader stay available.
+  // spec mode so the inline preview card and the reader pane stay available.
   sessionSpecs: Record<string, { path?: string; title: string; content: string }>;
-  // Which session's spec is open in the full wiki reader (null = closed).
-  specWikiAppSessionId: string | null;
+  // Which session's spec is open in the docked reader pane (null = closed).
+  specReaderAppSessionId: string | null;
   // Held locally until the current turn finishes, then delivered one at a time.
   promptQueue: Record<string, QueuedPrompt[]>;
   // Scratch notes parked from the Context panel, per session. Persisted in
@@ -466,8 +466,8 @@ type Action =
   | { type: 'REMOVE_QUEUED_PROMPT'; appSessionId: string; id: string }
   | { type: 'REORDER_QUEUE'; appSessionId: string; from: number; to: number }
   | { type: 'SPEC_SET'; appSessionId: string; path?: string; title: string; content: string }
-  | { type: 'SPEC_OPEN_WIKI'; appSessionId: string }
-  | { type: 'SPEC_CLOSE_WIKI' }
+  | { type: 'SPEC_OPEN_READER'; appSessionId: string }
+  | { type: 'SPEC_CLOSE_READER' }
   | { type: 'SESSION_PERMISSION'; request: PermissionRequest }
   | { type: 'SESSION_QUESTION'; question: SessionQuestion }
   | {
@@ -694,7 +694,7 @@ export const initialState: AppState = {
   contextStats: { primary: {}, child: {} },
   specPlans: {},
   sessionSpecs: {},
-  specWikiAppSessionId: null,
+  specReaderAppSessionId: null,
   promptQueue: {},
   sessionNotes: loadSessionNotes(),
   agentProcesses: {},
@@ -1279,11 +1279,11 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case 'SPEC_OPEN_WIKI':
-      return { ...state, specWikiAppSessionId: action.appSessionId };
+    case 'SPEC_OPEN_READER':
+      return { ...state, specReaderAppSessionId: action.appSessionId };
 
-    case 'SPEC_CLOSE_WIKI':
-      return { ...state, specWikiAppSessionId: null };
+    case 'SPEC_CLOSE_READER':
+      return { ...state, specReaderAppSessionId: null };
 
     case 'SESSION_PERMISSION': {
       const r = action.request;

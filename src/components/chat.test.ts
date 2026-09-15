@@ -981,13 +981,13 @@ test('#14 an assistant message that is exactly the spec text is not double-rende
   const html = renderToStaticMarkup(
     createElement(MessageFeed, { events, pending: false, specContent: spec }),
   );
-  // The pinned spec card is present (its title renders)...
+  // The spec preview card is present (its title renders)...
   assert.ok(html.includes('Specification'));
   // ...and the identical assistant message is suppressed from the chat stream,
-  // so the spec body is not duplicated as a normal chat row (the card body is
-  // collapsed by default, hence absent here).
+  // so the spec body renders exactly once (inside the preview card), never
+  // duplicated as a normal chat row.
   const occurrences = html.split('The one and only spec body').length - 1;
-  assert.equal(occurrences, 0);
+  assert.equal(occurrences, 1);
 });
 
 // ── #39: edit activity must not inflate when one edit streams as many calls ──
@@ -1266,7 +1266,8 @@ test('#19/#14 a spec fragment split by reconciliation is not merged into prose',
     createElement(MessageFeed, { events, pending: false, specContent: spec }),
   );
   assert.ok(html.includes('Here is the plan.'));
-  assert.equal(html.split('The sole spec body line').length - 1, 0);
+  // The spec body renders once — inside the preview card — not again as prose.
+  assert.equal(html.split('The sole spec body line').length - 1, 1);
 });
 
 test('parseTruncatedTail splits the history truncation sentinel from the body', () => {
