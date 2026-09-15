@@ -44,7 +44,6 @@ import { useFileAttachments } from '../hooks/useFileAttachments';
 import { useComposerFileDrop } from '../hooks/useComposerFileDrop';
 import { ImageChip } from './composer/ImageChip';
 import { FileChip } from './composer/FileChip';
-import { RunningProcessesChip } from './composer/RunningProcessesChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
 import { ImageLightbox } from './media/ImageLightbox';
 import { imageSrc, partitionImagePaths } from '../lib/localImage';
@@ -1759,8 +1758,6 @@ export default function PromptInput({
             >
               <span>{isSpecMode ? 'Spec' : 'Chat'}</span>
             </button>
-
-            {activeSession && <RunningProcessesChip appSessionId={activeSession.appSessionId} />}
 
             <div className="flex-1 min-w-0" />
 
