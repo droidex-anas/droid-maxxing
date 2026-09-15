@@ -1,0 +1,24 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e6eaf0; background: #090b0f; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.walkthrough { position: relative; padding: 0 14px 4px; }
+.bar { min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.eyebrow { position: absolute; top: 10px; right: 14px; color: #919aa7; font-size: 10px; font-weight: 550; letter-spacing: 1.5px; }
+.controls { display: flex; gap: 2px; }
+.controls button { padding-inline: 6px; }
+button { appearance: none; background: none; border: 0; color: #aeb8c5; font: inherit; font-size: 11px; cursor: pointer; min-height: 44px; padding: 0 9px; border-radius: 8px; }
+button:hover { color: #f2f5f8; background: #171d25; }
+button:focus-visible { outline: 2px solid #a8b9d0; outline-offset: -2px; }
+button:disabled { cursor: default; color: #717c8c; background: none; }
+.scene { height: 112px; overflow: hidden; }
+.scene svg { width: 100%; height: 100%; display: block; }
+.captions { display: grid; min-height: 37px; text-align: center; }
+.caption { grid-area: 1 / 1; pointer-events: none; }
+.caption strong { display: block; font-size: 14px; font-weight: 550; letter-spacing: -.15px; }
+.caption span { display: block; margin-top: 4px; color: #909dad; font-size: 11px; line-height: 1.4; }
+.steps { display: flex; justify-content: center; align-items: center; gap: 2px; height: 44px; }
+.steps button { width: 28px; padding: 0; min-height: 44px; }
+.steps button::after { content: ''; display: block; height: 3px; width: 17px; margin: auto; border-radius: 2px; background: #3d4755; }
+.steps button[aria-pressed="true"]::after { background: #d1dce9; }
+.visually-hidden { position: absolute; margin: -1px; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 380px) { .walkthrough { padding-inline: 10px; } .scene { height: 96px; } .caption span { font-size: 10px; } }

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" role="img" aria-labelledby="guide-title guide-description">
+  <title id="guide-title">Connect DROIDEX to your phone</title>
+  <desc id="guide-description">Open Remote on your computer and choose a project. On your phone choose Add computer and scan a QR when offered, or paste the pairing code. Approve your phone on your computer. Choose an available model and continue a session. Keep both devices on the same trusted network. All screens are illustrations, not live connection status.</desc>
+  <!-- DEVICE_DEFS -->
+  <style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.heading{font-size:20px;font-weight:550;fill:#e9edf3}.detail{font-size:13px;fill:#96a3b5}.number{font-size:11px;letter-spacing:1px;fill:#9daabe}</style>
+  <rect width="960" height="800" rx="26" fill="#090b0f"/>
+  <text x="42" y="43" font-size="12" letter-spacing="2.5" font-weight="600" fill="#dde5ef">DROIDEX</text>
+  <text x="918" y="43" text-anchor="end" font-size="10" letter-spacing="1.4" fill="#8592a5">REMOTE / PAIRING GUIDE</text>
+  <text x="42" y="99" font-size="38" font-weight="550" letter-spacing="-1.2" fill="#edf1f7">Your computer. On your phone.</text>
+  <text x="43" y="129" font-size="15" fill="#95a1b3">One connection. The workspace you already know.</text>
+  <g fill="#10141a" stroke="#27303d" stroke-width="1">
+    <rect x="40" y="162" width="430" height="272" rx="18"/>
+    <rect x="490" y="162" width="430" height="272" rx="18"/>
+    <rect x="40" y="452" width="430" height="272" rx="18"/>
+    <rect x="490" y="452" width="430" height="272" rx="18"/>
+  </g>
+  <g transform="translate(62 188)">
+    <text class="number">01 / COMPUTER</text>
+    <text class="heading" y="31">Open Remote in DROIDEX</text>
+    <text class="detail" y="54">Choose the project you want to share.</text>
+    <text class="detail" y="73">Enable mobile access to get your pairing code.</text>
+    <g transform="translate(86 91) scale(.77)">
+      <use href="#computer-frame" width="264" height="174"/>
+      <path d="M27 29H236M81 29V144" stroke="#2e3744" stroke-width="1"/>
+      <text x="29" y="22" font-size="7" letter-spacing="1" fill="#bcc9da">DROIDEX</text>
+      <path d="M30 44H62M30 57H55" stroke="#535f6f" stroke-width="3" stroke-linecap="round"/>
+      <rect x="26" y="70" width="49" height="20" rx="5" fill="#293442"/>
+      <text x="33" y="83" font-size="8" fill="#e0e8f3">Remote</text>
+      <text x="95" y="53" font-size="10" fill="#e3ebf6">Connect your phone.</text>
+      <rect x="94" y="66" width="130" height="29" rx="7" fill="#1b2330" stroke="#425067" stroke-width=".7"/>
+      <text x="103" y="84" font-size="9" fill="#b3c1d4">Choose your project</text>
+      <rect x="94" y="108" width="91" height="24" rx="12" fill="#e0e8f3"/>
+      <text x="139" y="123" text-anchor="middle" font-size="8.5" font-weight="550" fill="#151c27">Pair phone</text>
+    </g>
+  </g>
+  <g transform="translate(512 188)">
+    <text class="number">02 / PHONE</text>
+    <text class="heading" y="31">Scan or paste the code</text>
+    <text class="detail" y="54">Choose Add computer. Scan a QR when offered,</text>
+    <text class="detail" y="73">or paste the pairing code from your computer.</text>
+    <g transform="translate(76 86) scale(.93)">
+      <use href="#phone-frame" x="-1" width="73.9" height="150"/>
+      <text x="36" y="30" text-anchor="middle" font-size="6" fill="#dce5f2">Add computer</text>
+      <rect x="12" y="44" width="48" height="48" rx="10" fill="#1b2430" stroke="#58677b" stroke-width=".6"/>
+      <use href="#pair-pattern" x="19" y="51" width="34" height="34" color="#c6d2e2"/>
+      <rect x="10" y="112" width="52" height="17" rx="8.5" fill="#e0e8f3"/>
+      <text x="36" y="123" text-anchor="middle" font-size="5.2" fill="#111a25">Paste code</text>
+    </g>
+    <path d="M158 159H198" stroke="#7c8ba0" stroke-width="1.5" stroke-dasharray="3 6"/>
+    <rect x="208" y="122" width="100" height="77" rx="12" fill="url(#glass)" stroke="#465267" stroke-width=".8"/>
+    <use href="#pair-pattern" x="239" y="132" width="38" height="38" color="#d8e2ef"/>
+    <text x="258" y="185" text-anchor="middle" font-size="8" fill="#9daec3">PAIRING CODE</text>
+  </g>
+  <g transform="translate(62 478)">
+    <text class="number">03 / COMPUTER</text>
+    <text class="heading" y="31">Approve your own phone</text>
+    <text class="detail" y="54">Confirm the request on your computer.</text>
+    <text class="detail" y="73">Your provider credentials stay there.</text>
+    <g transform="translate(86 91) scale(.77)">
+      <use href="#computer-frame" width="264" height="174"/>
+      <rect x="47" y="34" width="170" height="99" rx="13" fill="url(#glass)" stroke="#626f82" stroke-width=".7"/>
+      <text x="132" y="61" text-anchor="middle" font-size="12" font-weight="550" fill="#e7eef7">Approve this phone?</text>
+      <path d="M77 76H187M90 83H174" stroke="#8797ac" stroke-width="2.5" stroke-linecap="round" opacity=".6"/>
+      <rect x="61" y="97" width="66" height="25" rx="12.5" fill="#252f3e"/>
+      <text x="94" y="113" text-anchor="middle" font-size="8.5" fill="#c2cfe0">Decline</text>
+      <rect x="135" y="97" width="69" height="25" rx="12.5" fill="#e0e8f3"/>
+      <text x="169.5" y="113" text-anchor="middle" font-size="8.5" font-weight="550" fill="#151c27">Approve</text>
+    </g>
+  </g>
+  <g transform="translate(512 478)">
+    <text class="number">04 / WORKSPACE</text>
+    <text class="heading" y="31">Continue from your phone</text>
+    <text class="detail" y="54">Choose an available model. Send a prompt,</text>
+    <text class="detail" y="73">follow its activity, and review the changes.</text>
+    <g transform="translate(65 86) scale(.93)">
+      <use href="#phone-frame" x="-1" width="73.9" height="150"/>
+      <text x="10" y="29" font-size="6" fill="#dce5f2">Your session</text>
+      <rect x="19" y="41" width="43" height="20" rx="7" fill="#2b3746"/>
+      <path d="M25 48H55M25 54H47M10 81H59M10 88H52M10 95H56" stroke="#becbdd" stroke-width="1.7" stroke-linecap="round"/>
+      <text x="10" y="73" font-size="3.5" letter-spacing=".7" fill="#95a8bf">DROIDEX</text>
+      <rect x="9" y="117" width="54" height="17" rx="8.5" fill="url(#glass)" stroke="#465267" stroke-width=".6"/>
+      <path d="M16 126H42" stroke="#7f92ab" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="55" cy="125.5" r="4.7" fill="#dae5f3"/>
+    </g>
+    <g transform="translate(165 126)">
+      <rect width="158" height="84" rx="12" fill="url(#glass)" stroke="#465267" stroke-width=".8"/>
+      <text x="14" y="22" font-size="11" font-weight="550" fill="#e3eaf5">Review changes</text>
+      <rect x="10" y="35" width="138" height="16" rx="3" fill="#503838" opacity=".7"/>
+      <rect x="10" y="54" width="138" height="16" rx="3" fill="#28443b" opacity=".8"/>
+      <path d="M17 43H22M29 43H110" stroke="#d0a5a5" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M17 62H22M19.5 59.5V64.5M29 62H126" stroke="#aed5c2" stroke-width="1.8" stroke-linecap="round"/>
+    </g>
+  </g>
+  <path d="M42 748H918" stroke="#28313e"/>
+  <text x="42" y="776" font-size="12" fill="#93a0b3">Same trusted network. Computer awake. DROIDEX open.</text>
+  <text x="918" y="776" text-anchor="end" font-size="10" fill="#727f92">Illustrated guide · No usable pairing code</text>
+</svg>

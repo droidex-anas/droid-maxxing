@@ -1,0 +1,364 @@
+// !$*UTF8*$!
+{
+	"archiveVersion" = 1;
+	"classes" = {
+	};
+	"objectVersion" = 77;
+	"objects" = {
+		"9EB6AD13B97C59CC0A5AE62B" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"87E3E78C7F81AE38A20E58D7",
+				"AE3F04D280C764A091682FA1",
+				"A021CDA4A32CF62F1D690B94",
+				"CC90CECCB6BEAAC532405CA8",
+			);
+			"sourceTree" = "<group>";
+		};
+		"87E3E78C7F81AE38A20E58D7" = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "DroidexApp";
+			"sourceTree" = "<group>";
+			"explicitFileTypes" = {
+			};
+			"explicitFolders" = (
+			);
+		};
+		"A021CDA4A32CF62F1D690B94" = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "DroidexUITests";
+			"sourceTree" = "<group>";
+			"explicitFileTypes" = {
+			};
+			"explicitFolders" = (
+			);
+		};
+		"0DFFB82B28486EF2C812CEA1" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"path" = "Droidex.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"3A0E8000F85DDAF132146161" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.cfbundle";
+			"path" = "DroidexUITests.xctest";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"CC90CECCB6BEAAC532405CA8" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"0DFFB82B28486EF2C812CEA1",
+				"3A0E8000F85DDAF132146161",
+			);
+			"name" = "Products";
+			"sourceTree" = "<group>";
+		};
+		"AE3F04D280C764A091682FA1" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "folder";
+			"name" = "RemoteArtwork";
+			"path" = "../../electron/mobile/RemoteArtwork";
+			"sourceTree" = "<group>";
+		};
+		"AE3F04D280C764A091682FA2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "AE3F04D280C764A091682FA1";
+		};
+		"B2BBA9616B93ACBA25816E14" = {
+			"isa" = "XCLocalSwiftPackageReference";
+			"relativePath" = "DroidexCore";
+		};
+		"E80CC90DFD105056CB3D8750" = {
+			"isa" = "XCSwiftPackageProductDependency";
+			"package" = "B2BBA9616B93ACBA25816E14";
+			"productName" = "DroidexCore";
+		};
+		"F3DC27213570CDE1A965F7D3" = {
+			"isa" = "PBXBuildFile";
+			"productRef" = "E80CC90DFD105056CB3D8750";
+		};
+		"36FF84A82D73E46DDE15647F" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"7566C73891B2359C0E0AE1EC" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"F3DC27213570CDE1A965F7D3",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"3F7B9E2ED155E61B36D14CF9" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"AE3F04D280C764A091682FA2",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"E31EBB1901DC9229F0DE0CC7" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"2C9608AC9E78C48D3425F1C4" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"AD334A4C6F19ED1A173DF6D8" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"D4E4828E29801F58081749D4" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "B790167CA4457BD87B0348B5";
+			"proxyType" = 1;
+			"remoteGlobalIDString" = "409536962B1ED4CB8943EA6A";
+			"remoteInfo" = "Droidex";
+		};
+		"521E27E963719C4B800474C4" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "409536962B1ED4CB8943EA6A";
+			"targetProxy" = "D4E4828E29801F58081749D4";
+		};
+		"409536962B1ED4CB8943EA6A" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "9B54A142CA8E4729488366D1";
+			"buildPhases" = (
+				"36FF84A82D73E46DDE15647F",
+				"7566C73891B2359C0E0AE1EC",
+				"3F7B9E2ED155E61B36D14CF9",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"fileSystemSynchronizedGroups" = (
+				"87E3E78C7F81AE38A20E58D7",
+			);
+			"name" = "Droidex";
+			"packageProductDependencies" = (
+				"E80CC90DFD105056CB3D8750",
+			);
+			"productName" = "Droidex";
+			"productReference" = "0DFFB82B28486EF2C812CEA1";
+			"productType" = "com.apple.product-type.application";
+		};
+		"CC7D3D85CA781359A3C99C77" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "0A1B7538C07B97E07D90F7F3";
+			"buildPhases" = (
+				"E31EBB1901DC9229F0DE0CC7",
+				"2C9608AC9E78C48D3425F1C4",
+				"AD334A4C6F19ED1A173DF6D8",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+				"521E27E963719C4B800474C4",
+			);
+			"fileSystemSynchronizedGroups" = (
+				"A021CDA4A32CF62F1D690B94",
+			);
+			"name" = "DroidexUITests";
+			"packageProductDependencies" = (
+			);
+			"productName" = "DroidexUITests";
+			"productReference" = "3A0E8000F85DDAF132146161";
+			"productType" = "com.apple.product-type.bundle.ui-testing";
+		};
+		"5A2E62BEAC0E08AA79CAAAB0" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "27.0";
+				"SDKROOT" = "iphoneos";
+				"SWIFT_VERSION" = "6.0";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
+				"ENABLE_TESTABILITY" = "YES";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"D4D82C2F8762C9DFAA7EAD38" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "27.0";
+				"SDKROOT" = "iphoneos";
+				"SWIFT_VERSION" = "6.0";
+				"SWIFT_STRICT_CONCURRENCY" = "complete";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"D22C4227D4CAF80BE60EB4AC" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"5A2E62BEAC0E08AA79CAAAB0",
+				"D4D82C2F8762C9DFAA7EAD38",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"13B6CB7A0CE54E8FD398E468" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "app.droidex.mobile.preview";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_FILE" = "AppInfo.plist";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "DROIDEX";
+				"INFOPLIST_KEY_LSApplicationCategoryType" = "public.app-category.developer-tools";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD" = "NO";
+				"MARKETING_VERSION" = "0.2.0";
+				"CURRENT_PROJECT_VERSION" = "2";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"ENABLE_PREVIEWS" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks";
+			};
+			"name" = "Debug";
+		};
+		"F8A60A1F3C72E4024C176055" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "app.droidex.mobile.preview";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_FILE" = "AppInfo.plist";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "DROIDEX";
+				"INFOPLIST_KEY_LSApplicationCategoryType" = "public.app-category.developer-tools";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD" = "NO";
+				"MARKETING_VERSION" = "0.2.0";
+				"CURRENT_PROJECT_VERSION" = "2";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"ENABLE_PREVIEWS" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks";
+			};
+			"name" = "Release";
+		};
+		"9B54A142CA8E4729488366D1" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"13B6CB7A0CE54E8FD398E468",
+				"F8A60A1F3C72E4024C176055",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"D552AAEC8A307DCC73B48DEB" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "app.droidex.mobile.preview.uitests";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"TEST_TARGET_NAME" = "Droidex";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+			};
+			"name" = "Debug";
+		};
+		"AE05C4633FFA87ECB219B309" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "app.droidex.mobile.preview.uitests";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"TEST_TARGET_NAME" = "Droidex";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+			};
+			"name" = "Release";
+		};
+		"0A1B7538C07B97E07D90F7F3" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"D552AAEC8A307DCC73B48DEB",
+				"AE05C4633FFA87ECB219B309",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"B790167CA4457BD87B0348B5" = {
+			"isa" = "PBXProject";
+			"attributes" = {
+				"BuildIndependentTargetsInParallel" = "YES";
+				"LastSwiftUpdateCheck" = "2700";
+				"LastUpgradeCheck" = "2700";
+				"TargetAttributes" = {
+					"409536962B1ED4CB8943EA6A" = {
+						"CreatedOnToolsVersion" = "27.0";
+					};
+					"CC7D3D85CA781359A3C99C77" = {
+						"CreatedOnToolsVersion" = "27.0";
+						"TestTargetID" = "409536962B1ED4CB8943EA6A";
+					};
+				};
+			};
+			"buildConfigurationList" = "D22C4227D4CAF80BE60EB4AC";
+			"developmentRegion" = "en";
+			"hasScannedForEncodings" = 0;
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"mainGroup" = "9EB6AD13B97C59CC0A5AE62B";
+			"minimizedProjectReferenceProxies" = 1;
+			"packageReferences" = (
+				"B2BBA9616B93ACBA25816E14",
+			);
+			"preferredProjectObjectVersion" = 77;
+			"productRefGroup" = "CC90CECCB6BEAAC532405CA8";
+			"projectDirPath" = "";
+			"projectRoot" = "";
+			"targets" = (
+				"409536962B1ED4CB8943EA6A",
+				"CC7D3D85CA781359A3C99C77",
+			);
+		};
+	};
+	"rootObject" = "B790167CA4457BD87B0348B5";
+}

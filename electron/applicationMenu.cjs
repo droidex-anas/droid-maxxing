@@ -54,7 +54,11 @@ function createApplicationMenuTemplate(options) {
       : []),
     {
       label: 'File',
-      submenu: [isMac ? { role: 'close' } : { role: 'quit' }],
+      submenu: [
+        { label: 'Connect phone…', click: () => options.connectPhone() },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' },
+      ],
     },
     {
       label: 'Edit',
@@ -99,6 +103,10 @@ function installApplicationMenu(options) {
     platform: options.platform || process.platform,
     isPackaged: options.app.isPackaged,
     reload: options.reload,
+    connectPhone: () => {
+      void require('./mobile/desktop.cjs').openMobileWindow()
+        .catch((error) => options.logError(error.message));
+    },
     checkForUpdates: () =>
       void options.appUpdater
         .check({

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'">
+  <title>Connect your phone · DROIDEX</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="window.js" defer></script>
+</head>
+<body>
+  <header>DROIDEX <span>REMOTE / LOCAL TEST</span></header>
+  <main>
+    <h1>Your workspace.<br>Your phone.</h1>
+    <p class="intro">Keep DROIDEX open here. Start sessions, follow the work, and review changes from your iPhone.</p>
+    <div class="artwork-banner">
+      <iframe id="remote-artwork" src="RemoteArtwork/banner.html" title="Illustrated guide to pairing DROIDEX" loading="lazy"></iframe>
+      <button id="share-guide" class="guide-action">Save SVG pairing guide</button>
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <section id="setup">
+      <label for="network">Local network</label>
+      <select id="network" aria-label="Computer network address"></select>
+      <label for="folder">Workspace</label>
+      <button id="folder" class="secondary">Choose a folder…</button>
+      <p class="fine">Use the same trusted Wi-Fi on both devices. Your provider accounts stay on this computer.</p>
+      <button id="enable">Enable mobile access</button>
+    </section>
+    <section id="connection" hidden>
+      <div class="status"><span id="state">Ready to pair</span><span id="expiry"></span></div>
+      <p id="workspace" class="path"></p>
+      <p id="instruction">On your iPhone, open DROIDEX, choose Add computer, and paste this pairing code.</p>
+      <button id="copy">Copy pairing code</button>
+      <div id="pending" hidden>
+        <h2 id="request-name"></h2>
+        <p>Approve only if you just entered the code on this phone.</p>
+        <div class="actions"><button id="deny" class="secondary">Decline</button><button id="approve">Approve phone</button></div>
+      </div>
+      <p class="fine" id="detail"></p>
+      <button id="disable" class="secondary">Disable and revoke access</button>
+    </section>
+    <footer>Local testing only. No cloud relay. Disabling access closes sessions started by this connection; it does not undo edits.</footer>
+  </main>
+</body>
+</html>
