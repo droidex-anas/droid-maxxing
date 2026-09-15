@@ -1759,155 +1759,159 @@ export default function PromptInput({
               <span>{isSpecMode ? 'Spec' : 'Chat'}</span>
             </button>
 
-            <div className="flex-1 min-w-0" />
-
-            {/* Autonomy: read-only for a targeted child, live control for an
+            {/* Trailing cluster. It wraps to its own row as one unit on
+                narrow windows, and justify-end keeps the send button on the
+                right edge instead of dropping it to the row start. flex-auto
+                (not flex-1) so its content width is what triggers the wrap. */}
+            <div className="flex min-w-0 flex-auto items-center justify-end gap-1.5">
+              {/* Autonomy: read-only for a targeted child, live control for an
                 open session, draft override before a session exists. */}
-            {targetChild ? (
-              <span
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] text-droid-text-muted shrink-0"
-                title={
-                  targetChild.autonomy
-                    ? `Child session autonomy: ${AUTONOMY_LABELS[targetChild.autonomy]}`
-                    : 'Child autonomy is managed by the provider until the session is opened'
-                }
-              >
-                <span>
-                  {targetChild.autonomy
-                    ? AUTONOMY_LABELS[targetChild.autonomy]
-                    : 'Provider managed'}
+              {targetChild ? (
+                <span
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] text-droid-text-muted shrink-0"
+                  title={
+                    targetChild.autonomy
+                      ? `Child session autonomy: ${AUTONOMY_LABELS[targetChild.autonomy]}`
+                      : 'Child autonomy is managed by the provider until the session is opened'
+                  }
+                >
+                  <span>
+                    {targetChild.autonomy
+                      ? AUTONOMY_LABELS[targetChild.autonomy]
+                      : 'Provider managed'}
+                  </span>
                 </span>
-              </span>
-            ) : activeSession ? (
-              <AutonomySelector
-                scope="session"
-                value={activeSession.autonomy}
-                pending={activeSession.appSessionId in state.pendingAutonomy}
-                onSelect={(level) => {
-                  dispatch({
-                    type: 'AUTONOMY_UPDATE_REQUESTED',
-                    appSessionId: activeSession.appSessionId,
-                    autonomy: level,
-                  });
-                  updateSessionSettings({
-                    appSessionId: activeSession.appSessionId,
-                    autonomy: level,
-                  });
-                }}
-              />
-            ) : (
-              <AutonomySelector
-                scope="draft"
-                value={draftAutonomy}
-                onSelect={(level) => {
-                  dispatch({ type: 'SET_DRAFT_AUTONOMY', autonomy: level });
-                }}
-              />
-            )}
+              ) : activeSession ? (
+                <AutonomySelector
+                  scope="session"
+                  value={activeSession.autonomy}
+                  pending={activeSession.appSessionId in state.pendingAutonomy}
+                  onSelect={(level) => {
+                    dispatch({
+                      type: 'AUTONOMY_UPDATE_REQUESTED',
+                      appSessionId: activeSession.appSessionId,
+                      autonomy: level,
+                    });
+                    updateSessionSettings({
+                      appSessionId: activeSession.appSessionId,
+                      autonomy: level,
+                    });
+                  }}
+                />
+              ) : (
+                <AutonomySelector
+                  scope="draft"
+                  value={draftAutonomy}
+                  onSelect={(level) => {
+                    dispatch({ type: 'SET_DRAFT_AUTONOMY', autonomy: level });
+                  }}
+                />
+              )}
 
-            {turnStarting ? (
-              <button
-                type="button"
-                disabled
-                title="Starting turn"
-                className="p-2 rounded-full text-droid-bg shrink-0 opacity-90"
-                style={{ background: ACCENT }}
-              >
-                <Spinner className="w-3.5 h-3.5 motion-safe:animate-spin-slow" />
-              </button>
-            ) : isLive && !hasContent ? (
-              <button
-                onClick={() => {
-                  if (activeSession)
-                    interruptVisibleSession(activeSession.appSessionId, targetChildSessionId);
-                }}
-                title="Working — click to stop"
-                className="p-2 rounded-full text-droid-bg shrink-0 transition-opacity hover:opacity-90"
-                style={{ background: ACCENT }}
-              >
-                <Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />
-              </button>
-            ) : isLive ? (
-              // Keyboard users reach the send button by tab, never by pointer, so
-              // focus opens the same hint that hover does.
-              <div
-                className="relative shrink-0"
-                onMouseEnter={() => {
-                  setSendHintOpen(true);
-                }}
-                onMouseLeave={() => {
-                  setSendHintOpen(false);
-                }}
-                onFocus={() => {
-                  setSendHintOpen(true);
-                }}
-                onBlur={() => {
-                  setSendHintOpen(false);
-                }}
-              >
-                <AnimatePresence>
-                  {sendHintOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 4 }}
-                      transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute bottom-full right-0 mb-2 z-50 flex flex-col gap-0.5 rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-droid"
-                    >
-                      {[
-                        { label: enterSteers ? 'Steer' : 'Queue', keys: ['⏎'] },
-                        { label: enterSteers ? 'Queue' : 'Steer', keys: ['⌘', '⏎'] },
-                      ].map((row) => (
-                        <div
-                          key={row.label}
-                          className="flex items-center justify-between gap-3 rounded-lg px-2 py-1 text-[12px] text-droid-text"
-                        >
-                          <span>{row.label}</span>
-                          <span className="flex items-center gap-0.5 rounded-md bg-droid-bg/70 px-1.5 py-0.5 text-[11px] text-droid-text-secondary">
-                            {row.keys.map((k) => (
-                              <kbd key={k} className="font-sans leading-none">
-                                {k}
-                              </kbd>
-                            ))}
-                          </span>
-                        </div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+              {turnStarting ? (
                 <button
-                  onClick={() => void handleSubmit(enterSteers ? 'now' : 'queue')}
-                  disabled={runtimeActionsBlocked}
+                  type="button"
+                  disabled
+                  title="Starting turn"
+                  className="p-2 rounded-full text-droid-bg shrink-0 opacity-90"
+                  style={{ background: ACCENT }}
+                >
+                  <Spinner className="w-3.5 h-3.5 motion-safe:animate-spin-slow" />
+                </button>
+              ) : isLive && !hasContent ? (
+                <button
+                  onClick={() => {
+                    if (activeSession)
+                      interruptVisibleSession(activeSession.appSessionId, targetChildSessionId);
+                  }}
+                  title="Working — click to stop"
+                  className="p-2 rounded-full text-droid-bg shrink-0 transition-opacity hover:opacity-90"
+                  style={{ background: ACCENT }}
+                >
+                  <Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />
+                </button>
+              ) : isLive ? (
+                // Keyboard users reach the send button by tab, never by pointer, so
+                // focus opens the same hint that hover does.
+                <div
+                  className="relative shrink-0"
+                  onMouseEnter={() => {
+                    setSendHintOpen(true);
+                  }}
+                  onMouseLeave={() => {
+                    setSendHintOpen(false);
+                  }}
+                  onFocus={() => {
+                    setSendHintOpen(true);
+                  }}
+                  onBlur={() => {
+                    setSendHintOpen(false);
+                  }}
+                >
+                  <AnimatePresence>
+                    {sendHintOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
+                        className="absolute bottom-full right-0 mb-2 z-50 flex flex-col gap-0.5 rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-droid"
+                      >
+                        {[
+                          { label: enterSteers ? 'Steer' : 'Queue', keys: ['⏎'] },
+                          { label: enterSteers ? 'Queue' : 'Steer', keys: ['⌘', '⏎'] },
+                        ].map((row) => (
+                          <div
+                            key={row.label}
+                            className="flex items-center justify-between gap-3 rounded-lg px-2 py-1 text-[12px] text-droid-text"
+                          >
+                            <span>{row.label}</span>
+                            <span className="flex items-center gap-0.5 rounded-md bg-droid-bg/70 px-1.5 py-0.5 text-[11px] text-droid-text-secondary">
+                              {row.keys.map((k) => (
+                                <kbd key={k} className="font-sans leading-none">
+                                  {k}
+                                </kbd>
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <button
+                    onClick={() => void handleSubmit(enterSteers ? 'now' : 'queue')}
+                    disabled={runtimeActionsBlocked}
+                    title={
+                      appUpdateInstalling
+                        ? 'Installing DROIDEX update'
+                        : runtimeReady
+                          ? undefined
+                          : 'Agent runtime is unavailable'
+                    }
+                    className="p-2 rounded-full text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ background: ACCENT }}
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => void handleSubmit()}
+                  disabled={!hasContent || !childActionsEnabled || runtimeActionsBlocked}
                   title={
                     appUpdateInstalling
                       ? 'Installing DROIDEX update'
                       : runtimeReady
-                        ? undefined
+                        ? idleSendTooltip
                         : 'Agent runtime is unavailable'
                   }
-                  className="p-2 rounded-full text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                   style={{ background: ACCENT }}
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => void handleSubmit()}
-                disabled={!hasContent || !childActionsEnabled || runtimeActionsBlocked}
-                title={
-                  appUpdateInstalling
-                    ? 'Installing DROIDEX update'
-                    : runtimeReady
-                      ? idleSendTooltip
-                      : 'Agent runtime is unavailable'
-                }
-                className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-                style={{ background: ACCENT }}
-              >
-                <ArrowUp className="w-3.5 h-3.5" />
-              </button>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
