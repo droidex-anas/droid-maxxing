@@ -1,6 +1,5 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react';
-import { Plus, X } from 'lucide-react';
-import { PanelRight } from '@droidex/icons';
+import { PanelRight, Plus, X } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
 import { Popover } from '../environment/Popover';
 import type { UtilityPanelState, UtilityTab, UtilityTool } from '../../lib/utilityPanel';
@@ -184,7 +183,7 @@ export function UtilityPane({
           <Fragment key={activeTab.id}>{renderTab(activeTab, { overlayOpen: menuOpen })}</Fragment>
         ) : (
           <div className="flex h-full items-center justify-center px-3 pb-[8vh]">
-            <div className="w-full max-w-xl">
+            <div className="w-full max-w-[320px]">
               <UtilityToolPicker
                 spacious
                 tools={UTILITY_TOOL_OPTIONS.map((option) => option.tool)}
