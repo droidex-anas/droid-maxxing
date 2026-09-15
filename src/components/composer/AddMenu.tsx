@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FolderOpen, Plus } from 'lucide-react';
+import { FolderOpen, Plus, Scan } from 'lucide-react';
 import { VisualizeIcon } from '../icons/VisualizeIcon';
 
 const ACCENT = 'var(--droid-accent)';
@@ -92,12 +92,14 @@ export default function AddMenu({
   onOpenChange,
   visualizeSelected,
   onAttachFiles,
+  onCapture,
   onToggleVisualize,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   visualizeSelected: boolean;
   onAttachFiles: () => void;
+  onCapture?: () => void;
   onToggleVisualize: () => void;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -174,7 +176,7 @@ export default function AddMenu({
             ? 'bg-droid-bg/60 text-droid-text'
             : 'text-droid-text-muted hover:text-droid-text hover:bg-droid-bg/50'
         }`}
-        title="Add files or a plugin"
+        title="Add files, a screenshot, or a plugin"
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -205,6 +207,17 @@ export default function AddMenu({
                 close();
               }}
             />
+            {onCapture && (
+              <MenuRow
+                icon={Scan}
+                label="Screenshot"
+                hint="Capture a screen, window, or component"
+                onRun={() => {
+                  close();
+                  onCapture();
+                }}
+              />
+            )}
             <SectionTitle>Plugins</SectionTitle>
             <MenuRow
               icon={VisualizeIcon}

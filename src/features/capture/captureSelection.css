@@ -1,0 +1,120 @@
+.capture-crop-help {
+  padding: 12px 20px;
+}
+.capture-crop-help strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.capture-crop-help p {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--droid-text-muted);
+  margin-top: 4px;
+}
+.capture-crop-scroll {
+  overflow: auto;
+  max-height: 48vh;
+  margin: 8px 20px;
+  background: var(--droid-bg);
+  border-radius: 8px;
+}
+.capture-crop-image {
+  position: relative;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.capture-crop-image > img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+.capture-selection {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--droid-accent);
+  box-shadow: 0 0 0 20000px #0007;
+}
+.capture-selection > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  padding: 3px 6px;
+  font-size: 10px;
+  background: var(--droid-accent);
+  color: var(--droid-bg);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.capture-crop-values {
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px;
+}
+.capture-crop-values label {
+  font-size: 11px;
+  color: var(--droid-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+.capture-crop-values input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--droid-border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--droid-elevated);
+  color: var(--droid-text);
+  font-size: 12px;
+}
+.capture-component-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  pointer-events: none;
+}
+.capture-component-outline {
+  position: absolute;
+  border: 1.5px solid var(--droid-accent);
+  box-shadow: 0 0 0 20000px #0004;
+  border-radius: 5px;
+}
+.capture-component-hud {
+  position: absolute;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--droid-border);
+  border-radius: 16px;
+  padding: 16px 20px;
+  background: var(--droid-surface);
+  color: var(--droid-text);
+  box-shadow: 0 15px 65px #0005;
+}
+.capture-component-hud strong {
+  font-size: 13px;
+}
+.capture-component-hud > span {
+  font-size: 11px;
+  color: var(--droid-text-muted);
+}
+.capture-component-hud > div {
+  display: flex;
+  gap: 5px;
+  max-width: 100%;
+  overflow: auto;
+}
+.capture-component-hud [aria-pressed='true'] {
+  border-color: var(--droid-accent);
+}

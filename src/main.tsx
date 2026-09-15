@@ -9,6 +9,7 @@ import {
 } from './lib/rendererPerf';
 import { applyTheme } from './lib/theme';
 import App from './App';
+import { CaptureShortcutHost } from './features/capture/CaptureShortcutHost';
 import './index.css';
 
 if (window.droidControl) void initializeRendererDiagnostics();
@@ -33,6 +34,7 @@ createRoot(root).render(
   <StrictMode>
     <StoreProvider>
       <App />
+      <CaptureShortcutHost />
     </StoreProvider>
   </StrictMode>,
 );

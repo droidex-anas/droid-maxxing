@@ -1,0 +1,157 @@
+:root {
+  color-scheme: dark;
+  --droid-bg: #0a0a0a;
+  --droid-surface: #151515;
+  --droid-elevated: #222222;
+  --droid-border: #343434;
+  --droid-text: #ededed;
+  --droid-text-secondary: #b8b8b8;
+  --droid-text-muted: #999999;
+  --droid-accent: #e9973f;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+button {
+  font: inherit;
+}
+.desktop-picker {
+  outline: none;
+  padding: 12px;
+}
+.desktop-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 7px;
+  border: 1px solid var(--droid-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--droid-surface) 96%, transparent);
+  color: var(--droid-text);
+  box-shadow: 0 6px 24px #0004;
+}
+.desktop-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.desktop-toolbar button:hover {
+  background: var(--droid-elevated);
+}
+.desktop-toolbar button:focus-visible {
+  outline: 2px solid var(--droid-accent);
+  outline-offset: -2px;
+}
+.desktop-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.desktop-brand {
+  padding: 0 10px;
+  font-size: 17px;
+  font-weight: 650;
+}
+.desktop-divider {
+  height: 22px;
+  width: 1px;
+  background: var(--droid-border);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+.desktop-hint {
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 5px 10px;
+  border-radius: 9px;
+  color: var(--droid-text-secondary);
+  background: var(--droid-surface);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+.desktop-hint[role='alert'] {
+  max-width: 560px;
+}
+.desktop-selection {
+  position: fixed;
+  inset: 0;
+  outline: none;
+}
+.desktop-snapshot {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+}
+.desktop-selection-hitbox {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+.desktop-selection-outline {
+  position: absolute;
+  border: 1px solid var(--droid-accent);
+  border-radius: 3px;
+  box-shadow: 0 0 0 99999px #0005;
+  pointer-events: none;
+}
+.desktop-selection-outline > span {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  padding: 3px 6px;
+  background: var(--droid-surface);
+  color: var(--droid-text);
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.desktop-selection-controls {
+  position: absolute;
+  bottom: 24px;
+  left: 12px;
+  right: 12px;
+  pointer-events: none;
+}
+.desktop-selection-controls .desktop-toolbar {
+  pointer-events: auto;
+  margin-top: 10px;
+}
+.desktop-toolbar .desktop-confirm {
+  background: var(--droid-accent);
+  color: var(--droid-bg);
+}
+@media (max-width: 520px) {
+  .desktop-toolbar button {
+    padding: 8px;
+  }
+  .desktop-brand {
+    display: none;
+  }
+}

@@ -43,6 +43,8 @@ import { pathsInSequence, useImageAttachments } from '../hooks/useImageAttachmen
 import { useFileAttachments } from '../hooks/useFileAttachments';
 import { useComposerFileDrop } from '../hooks/useComposerFileDrop';
 import { ImageChip } from './composer/ImageChip';
+import { CaptureAttachmentCard } from '../features/capture/CaptureAttachmentCard';
+import { useCaptureComposer } from '../features/capture/useCaptureComposer';
 import { FileChip } from './composer/FileChip';
 import { RunningProcessesChip } from './composer/RunningProcessesChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
@@ -442,6 +444,11 @@ export default function PromptInput({
         : state.missionControlMode
           ? 'mission-draft'
           : 'chat-draft';
+  const capture = useCaptureComposer(
+    visibleTargetKey + ':' + (state.draftChat?.cwd ?? ''),
+    imageAttachments,
+    takeIntakeSeq,
+  );
   const stopTurnStarting = useCallback(() => {
     if (turnStartingTimerRef.current) {
       clearTimeout(turnStartingTimerRef.current);
@@ -911,6 +918,7 @@ export default function PromptInput({
     setHistoryIndex(null);
 
     const clearAfterSubmit = () => {
+      capture.invalidate();
       resetComposerAfterSubmit({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
@@ -1548,19 +1556,31 @@ export default function PromptInput({
         >
           {hasAttachmentChips && (
             <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
-              {imageAttachments.images.map((img) => (
-                <ImageChip
-                  key={img.id}
-                  src={img.preview}
-                  label={basename(img.path)}
-                  onOpen={() => {
-                    setViewerImageId(img.id);
-                  }}
-                  onRemove={() => {
-                    imageAttachments.remove(img.id);
-                  }}
-                />
-              ))}
+              {imageAttachments.images.map((img) =>
+                img.capture ? (
+                  <CaptureAttachmentCard
+                    key={img.id}
+                    preview={img.preview}
+                    capture={img.capture}
+                    onOpen={() => {
+                      if (img.capture) capture.edit(img.capture.id, img.id);
+                    }}
+                    onRemove={() => imageAttachments.remove(img.id)}
+                  />
+                ) : (
+                  <ImageChip
+                    key={img.id}
+                    src={img.preview}
+                    label={basename(img.path)}
+                    onOpen={() => {
+                      setViewerImageId(img.id);
+                    }}
+                    onRemove={() => {
+                      imageAttachments.remove(img.id);
+                    }}
+                  />
+                ),
+              )}
               {fileAttachments.files.map((file) => (
                 <FileChip
                   key={file.id}
@@ -1668,6 +1688,7 @@ export default function PromptInput({
               It wraps on narrow windows rather than pushing controls offscreen. */}
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
             <AddMenu
+              onCapture={capture.open}
               open={addMenuOpen}
               onOpenChange={setAddMenuOpen}
               visualizeSelected={visualizeSelected}
@@ -1915,6 +1936,7 @@ export default function PromptInput({
         </div>
       </div>
 
+      {capture.surface}
       {viewerImage && (
         <ImageViewerModal
           image={viewerImage}

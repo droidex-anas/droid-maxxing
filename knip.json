@@ -5,6 +5,8 @@
   },
   "entry": [
     "src/main.tsx",
+    "src/features/capture/desktop/main.tsx",
+    "electron/capture/desktopPreload.cjs",
     "vite.config.ts",
     "electron/*.cjs",
     "src/**/*.test.ts",

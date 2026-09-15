@@ -6,6 +6,20 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig(async () => ({
   plugins: [
     react(),
+    {
+      name: 'capture-development-csp',
+      apply: 'serve',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html, context) {
+          // React's development refresh preamble is inline. The packaged
+          // capture entry keeps its strict, external-script-only policy.
+          return context.path === '/capture.html'
+            ? html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';")
+            : html;
+        },
+      },
+    },
     process.env.ANALYZE_BUNDLE === 'true' &&
       visualizer({
         filename: 'reports/bundle-stats.html',
@@ -23,6 +37,14 @@ export default defineConfig(async () => ({
         replacement: fileURLToPath(new URL('./packages/icons/src/index.ts', import.meta.url)),
       },
     ],
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        capture: fileURLToPath(new URL('./capture.html', import.meta.url)),
+      },
+    },
   },
   clearScreen: false,
   server: {

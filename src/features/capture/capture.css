@@ -1,0 +1,383 @@
+@import './captureSelection.css';
+@import './captureSettings.css';
+.capture-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--droid-bg) 72%, transparent);
+  backdrop-filter: blur(8px);
+}
+.capture-dialog {
+  width: min(1060px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid var(--droid-border);
+  border-radius: 22px;
+  background: var(--droid-surface);
+  color: var(--droid-text);
+  box-shadow: 0 24px 100px #0006;
+  outline: none;
+  font-family: inherit;
+  animation: capture-arrive 0.2s ease-out;
+}
+.capture-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--droid-border);
+  gap: 16px;
+}
+.capture-header h2 {
+  font-size: 18px;
+  font-weight: 550;
+  letter-spacing: -0.025em;
+  margin: 3px 0 0;
+}
+.capture-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--droid-text-muted);
+}
+.capture-button,
+.capture-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--droid-border);
+  background: var(--droid-elevated);
+  color: var(--droid-text-secondary);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  transition:
+    background 0.15s,
+    color 0.15s;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.capture-icon {
+  padding: 7px;
+  border-color: transparent;
+  background: transparent;
+}
+.capture-button:hover,
+.capture-icon:hover {
+  color: var(--droid-text);
+  background: var(--droid-active);
+}
+.capture-button:disabled,
+.capture-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.capture-button:focus-visible,
+.capture-icon:focus-visible,
+.capture-preset:focus-visible {
+  outline: 2px solid var(--droid-accent);
+  outline-offset: 3px;
+}
+.capture-primary {
+  background: var(--droid-accent);
+  color: var(--droid-bg);
+  border-color: transparent;
+}
+.capture-primary:hover {
+  background: var(--droid-accent);
+  color: var(--droid-bg);
+  filter: brightness(1.07);
+}
+.capture-spacer {
+  flex: 1;
+}
+.capture-picker-content {
+  padding: 24px;
+}
+.capture-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--droid-text-muted);
+}
+.capture-note strong {
+  font-weight: 500;
+  color: var(--droid-text-secondary);
+}
+.capture-modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0;
+}
+.capture-modes > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 22px 16px;
+  gap: 10px;
+  border: 1px solid var(--droid-border);
+  border-radius: 15px;
+  background: var(--droid-elevated);
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.capture-modes > button:hover:not(:disabled) {
+  border-color: var(--droid-accent);
+  transform: translateY(-2px);
+}
+.capture-modes > button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.capture-modes strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.capture-modes span {
+  font-size: 11px;
+  color: var(--droid-text-muted);
+  line-height: 1.5;
+}
+.capture-modes svg {
+  width: 21px;
+  height: 21px;
+  margin-bottom: 8px;
+  color: var(--droid-text-secondary);
+}
+.capture-picker-footer,
+.capture-actions,
+.capture-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.capture-picker-footer {
+  margin: 12px 0 20px;
+}
+.capture-actions {
+  padding: 16px 20px;
+  border-top: 1px solid var(--droid-border);
+}
+.capture-editor-toolbar {
+  padding: 12px 20px;
+}
+.capture-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--droid-text-secondary);
+}
+.capture-check input {
+  accent-color: var(--droid-accent);
+}
+.capture-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  min-height: 350px;
+}
+.capture-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 28px;
+  background: var(--droid-bg);
+  border-top: 1px solid var(--droid-border);
+}
+.capture-stage canvas {
+  max-width: 100%;
+  max-height: 52vh;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+}
+.capture-inspector {
+  padding: 18px;
+  border-left: 1px solid var(--droid-border);
+  border-top: 1px solid var(--droid-border);
+  max-height: 62vh;
+  overflow: auto;
+}
+.capture-style-controls {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.capture-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: var(--droid-text-secondary);
+}
+.capture-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-bottom: 20px;
+}
+.capture-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  text-align: left;
+  min-width: 0;
+  color: var(--droid-text-muted);
+  font-size: 10px;
+}
+.capture-preset > span:first-child {
+  display: block;
+  aspect-ratio: 1.8;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--droid-border);
+}
+.capture-preset[aria-pressed='true'] {
+  border-color: var(--droid-accent);
+  color: var(--droid-text);
+}
+.capture-slider {
+  display: block;
+  margin-bottom: 17px;
+}
+.capture-slider > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--droid-text-secondary);
+  margin-bottom: 8px;
+}
+.capture-slider output {
+  color: var(--droid-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.capture-slider input {
+  width: 100%;
+  accent-color: var(--droid-accent);
+  height: 4px;
+  display: block;
+}
+.capture-default {
+  width: 100%;
+  margin: 6px 0 12px;
+}
+.capture-error {
+  padding: 10px 20px;
+  color: var(--droid-text);
+  border-left: 3px solid var(--droid-accent);
+  font-size: 12px;
+  background: var(--droid-elevated);
+  margin: 12px 20px;
+  border-radius: 4px;
+}
+.capture-working {
+  padding: 60px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.capture-working h3 {
+  font-size: 16px;
+  font-weight: 500;
+}
+.capture-working p {
+  max-width: 400px;
+  font-size: 12px;
+  color: var(--droid-text-muted);
+  line-height: 1.6;
+}
+.capture-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--droid-accent);
+  animation: capture-pulse 1.4s ease-in-out infinite;
+}
+@keyframes capture-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes capture-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (max-width: 720px) {
+  .capture-modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .capture-editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .capture-inspector {
+    border-left: 0;
+    max-height: none;
+  }
+  .capture-inspector .capture-swatches {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .capture-recents {
+    grid-template-columns: 1fr;
+  }
+  .capture-dialog {
+    max-height: 95vh;
+  }
+  .capture-backdrop {
+    padding: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .capture-dialog,
+  .capture-pulse {
+    animation: none;
+  }
+  .capture-modes > button {
+    transition: none;
+  }
+  .capture-modes > button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+.capture-colors {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.capture-colors label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--droid-text-muted);
+}
+.capture-colors input {
+  width: 100%;
+  height: 26px;
+  border: 1px solid var(--droid-border);
+  border-radius: 6px;
+  background: transparent;
+  padding: 2px;
+}

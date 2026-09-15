@@ -35,6 +35,7 @@ function loadApi(invokeResult) {
   const posts = [];
   const channels = [];
   let api;
+  let captureApi;
   const ipcRenderer = {
     invoke(channel, payload) {
       calls.push({ channel, payload });
@@ -61,11 +62,13 @@ function loadApi(invokeResult) {
       }
     },
     require(name) {
+      if (name === './capture/preload.cjs') return require('./capture/preload.cjs');
       if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
       return {
         contextBridge: {
-          exposeInMainWorld(_name, exposed) {
-            api = exposed;
+          exposeInMainWorld(name, exposed) {
+            if (name === 'droidControl') api = exposed;
+            if (name === 'droidCapture') captureApi = exposed;
           },
         },
         ipcRenderer,
@@ -77,7 +80,7 @@ function loadApi(invokeResult) {
       };
     },
   });
-  return { api, calls, listeners, removedListeners, posts, channels };
+  return { api, captureApi, calls, listeners, removedListeners, posts, channels };
 }
 
 test('notification IPC returns the main-process delivery result unchanged', async () => {
@@ -329,4 +332,21 @@ test('preload queues stay bounded before a consumer attaches and report dropped 
   assert.ok(queuedBytes <= 2 * 1024 * 1024);
   assert.ok(received.some((payload) => payload.truncated === true && payload.droppedBytes > 0));
   assert.ok(received.length < flood);
+});
+
+test('capture preload restricts operations and releases its shortcut listener', async () => {
+  const { captureApi, calls, listeners, removedListeners } = loadApi();
+  await captureApi.take({ requestId: 'capture-1', mode: 'area', operation: 'delete' });
+  assert.equal(calls[0].channel, 'capture:request');
+  assert.equal(calls[0].payload.operation, 'take');
+  assert.equal(calls[0].payload.mode, 'area');
+  let fired = 0;
+  const release = captureApi.onShortcut(() => {
+    fired += 1;
+  });
+  listeners[0].listener({ privateElectronEvent: true });
+  assert.equal(fired, 1);
+  release();
+  assert.equal(removedListeners.length, 1);
+  assert.equal(removedListeners[0].listener, listeners[0].listener);
 });

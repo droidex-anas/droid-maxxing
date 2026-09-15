@@ -28,6 +28,17 @@ function e(tab: string, label: string, keywords: string[] = []): SettingsSearchE
 const SHORTCUT_KEYWORDS = ['hotkeys', 'keymap', 'bindings', 'shortcuts', 'cmd'];
 
 export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
+  e('Screenshots', 'Capture backgrounds', [
+    'screenshot',
+    'snip',
+    'gradient',
+    'padding',
+    'corners',
+    'shadow',
+    'texture',
+  ]),
+  e('Screenshots', 'Recent captures', ['history', 'image', 'edit', 'copy', 'export', 'attach']),
+  e('Screenshots', 'Capture sound and shortcut', ['shutter', 'sound', 'hotkey', 'screen capture']),
   // ── Notifications (shared control definitions) ───────────────────────────
   ...FINISH_NOTIFICATION_TOGGLES.map((row) => e('Notifications', row.label, [...row.keywords])),
   e('Notifications', FINISH_NOTIFICATION_TEST_ACTION.label, [

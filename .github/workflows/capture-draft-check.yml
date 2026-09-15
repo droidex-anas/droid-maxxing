@@ -1,0 +1,109 @@
+name: Capture draft checks
+on:
+  push:
+    branches: [feat/capture-studio-draft]
+  pull_request:
+    paths:
+      - 'src/features/capture/**'
+      - 'electron/capture/**'
+      - 'src/components/PromptInput.tsx'
+      - 'src/components/SettingsPanel.tsx'
+      - 'src/hooks/useImageAttachments.ts'
+      - 'tools/capture-*'
+      - 'capture.html'
+      - 'vite.config.ts'
+      - '.github/workflows/capture-draft-check.yml'
+permissions:
+  contents: read
+concurrency:
+  group: capture-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - id: install
+        run: npm ci --ignore-scripts && npm ci --prefix sidecar --ignore-scripts
+        env:
+          HUSKY: '0'
+      - name: Typecheck renderer and sidecar
+        run: npm run typecheck && npm run sidecar:typecheck
+      - name: Check Electron syntax and capture regression tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run electron:check && npm run test:capture
+      - name: Lint capture and integration seams
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npx eslint src/features/capture electron/capture src/hooks/useImageAttachments.ts src/components/composer/AddMenu.tsx
+      - name: Production build and existing bundle budgets
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          if npm run build > capture-build.log 2>&1; then
+            tail -n 12 capture-build.log
+            npm run quality:bundle-budgets
+          else
+            tail -n 100 capture-build.log
+            exit 1
+          fi
+      - name: Full renderer and Electron test suite
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          if npm run test > capture-tests.log 2>&1; then
+            grep -E '^(ℹ|#) (tests|pass|fail|duration_ms) ' capture-tests.log
+          else
+            tail -n 100 capture-tests.log
+            exit 1
+          fi
+      - name: Formatting, documentation and source boundaries
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          npx prettier --check src/features/capture electron/capture docs/capture.md
+          npm run docs:check
+          npm run quality:file-size
+          npm run quality:boundaries
+          npm run quality:deadcode
+      - name: Retain diagnostic logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-diagnostic-logs
+          path: |
+            capture-build.log
+            capture-tests.log
+          retention-days: 3
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+        env:
+          HUSKY: '0'
+      - run: npx playwright install --with-deps chromium
+      - name: Capture UI and PNG fidelity
+        run: |
+          node tools/capture-ui-smoke.mjs
+          node tools/capture-desktop-smoke.mjs
+  mac-unit:
+    runs-on: macos-14
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Native executable and host unit tests
+        run: test -x /usr/sbin/screencapture && node --test electron/capture/*.test.cjs

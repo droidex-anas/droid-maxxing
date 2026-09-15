@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CaptureAttachment, CaptureMetadata } from '../features/capture/types';
 import { discardImage, isDesktop, saveImage } from '../lib/desktop';
 import { blobToDataUrl, cropImage, processImage } from '../lib/imageFiles';
 import type { CropRect, ImagePasteQuality } from '../lib/images';
@@ -8,10 +9,11 @@ export interface AttachedImage {
   id: string;
   /** Absolute path in the temp attachments dir; this is what the prompt @-mentions. */
   path: string;
-  /** Data URL of the saved (fidelity-processed) image, used for chips/viewer. */
+  /** Display preview. Capture previews are thumbnails, never export or crop sources. */
   preview: string;
   /** Composer-intake order, shared with pasted files so mixed drops stay in order. */
   sequence: number;
+  capture?: CaptureMetadata;
 }
 
 /**
@@ -187,6 +189,49 @@ export function useImageAttachments(quality: ImagePasteQuality) {
     additions.track(task);
   };
 
+  const addCapture = (
+    pending: Promise<CaptureAttachment>,
+    sequence: number,
+    replaceImageId?: string,
+  ): Promise<boolean> => {
+    const previous = replaceImageId
+      ? imagesRef.current.find((image) => image.id === replaceImageId)
+      : undefined;
+    const seq = previous?.sequence ?? sequence;
+    nextSeqRef.current = Math.max(nextSeqRef.current, seq + 1);
+    const stamp = additions.stamp();
+    const task = (async () => {
+      try {
+        const attachment = await pending;
+        const existing = replaceImageId
+          ? imagesRef.current.find((image) => image.id === replaceImageId)
+          : undefined;
+        if (additions.isStale(stamp) || (replaceImageId && !existing)) {
+          await discardImage(attachment.path);
+          return false;
+        }
+        const image: AttachedImage = {
+          id: replaceImageId ?? crypto.randomUUID(),
+          ...attachment,
+          sequence: seq,
+        };
+        sequencesRef.current.set(image.id, seq);
+        if (existing) {
+          commit(imagesRef.current.map((item) => (item.id === existing.id ? image : item)));
+          void discardImage(existing.path);
+        } else commit(insertBySequence(imagesRef.current, image, sequencesRef.current));
+        return true;
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError'))
+          toast.error(error instanceof Error ? error.message : 'Could not attach this capture');
+        return false;
+      }
+    })();
+    additions.track(task);
+    if (previous) crops.track(previous.sequence, task);
+    return task;
+  };
+
   const remove = (id: string) => {
     const hit = imagesRef.current.find((i) => i.id === id);
     if (!hit) return;
@@ -200,6 +245,8 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   const applyCrop = async (id: string, rect: CropRect) => {
     const target = imagesRef.current.find((i) => i.id === id);
     if (!target) return;
+    if (target.capture)
+      throw new Error('Open Capture to edit this screenshot from its original pixels');
     // Tracked as a mutation of an existing chip, not a new add: whenReady
     // waits for crops that start while an earlier encode is still in flight.
     const stamp = additions.stamp();
@@ -270,5 +317,23 @@ export function useImageAttachments(quality: ImagePasteQuality) {
     commit(keep);
   };
 
-  return { images, addBlob, remove, applyCrop, clear, clearAndDiscard, whenReady, clearReady };
+  useEffect(
+    () => () => {
+      additions.invalidate();
+      for (const image of imagesRef.current) void discardImage(image.path);
+    },
+    [additions],
+  );
+
+  return {
+    images,
+    addBlob,
+    addCapture,
+    remove,
+    applyCrop,
+    clear,
+    clearAndDiscard,
+    whenReady,
+    clearReady,
+  };
 }

@@ -38,6 +38,7 @@ const editorApps = require('./editorApps.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
+const { installCaptureService } = require('./capture/service.cjs');
 const { installContextMenu } = require('./contextMenu.cjs');
 const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
@@ -94,6 +95,7 @@ const sidecarSupervisor = createSidecarSupervisor({
 // subscribe() replays the current status synchronously, so mainWindow must
 // already be initialized when this runs.
 let mainWindow = null;
+let captureService = null;
 sidecarSupervisor.subscribe((status) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('sidecar-status', status);
@@ -230,6 +232,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  captureService?.dispose();
   sidecarSupervisor.stop();
   githubVcs.cancelSetup();
   closeAllDesktopNotifications();
@@ -306,6 +309,7 @@ function createMainWindow() {
   });
 
   mainWindow.on('closed', () => {
+    captureService?.cancel();
     rendererOomRecovery.cancel();
     githubVcs.cancelSetup();
     nativeBrowserManager.closeAll();
@@ -400,6 +404,12 @@ function registerIpc() {
   // Composer image pastes/drops land in a temp dir and travel to Droid as
   // ordinary @-mentioned paths; discard only ever unlinks inside that dir.
   const attachmentsDir = path.join(os.tmpdir(), 'droidex-attachments');
+  captureService = installCaptureService({
+    electron: require('electron'),
+    app,
+    getMainWindow: () => mainWindow,
+    saveImage: (dataUrl) => attachments.save(attachmentsDir, dataUrl),
+  });
   ipcMain.handle('save-image', (_event, { dataUrl }) => attachments.save(attachmentsDir, dataUrl));
   // Pasted non-image files (PDF, doc, video, ...) land in the same temp store
   // and likewise travel to Droid as @-mentioned paths.
