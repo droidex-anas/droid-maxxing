@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { shallowEqual, useStoreSelector, type AppState } from '../../hooks/useStore';
-import { sessionIsLive } from '../../lib/sessions';
-import { currentAgentRun } from '../agents/agentMonitorModel';
+import { currentAgentRun, isWorkingAgentStatus } from '../agents/agentMonitorModel';
 import { useOpenAgent } from '../agents/useOpenAgent';
 import { AgentDockLine } from './AgentDockLine';
 import PlanSteps from './PlanSteps';
@@ -71,7 +70,6 @@ export function selectDockedAgents(state: AppState) {
     models: state.models,
     provider: session?.provider,
     missionControl: session?.sessionPurpose === 'mission-control',
-    live: session ? sessionIsLive(session) : false,
   };
 }
 
@@ -81,15 +79,15 @@ function useDockedAgents() {
   return useMemo(() => {
     if (!source.children || source.missionControl) return null;
     const sessions = currentAgentRun(Object.values(source.children));
-    if (sessions.length === 0) return null;
-    // A restart restores an interrupted child as paused, and nothing will ever
-    // settle it. Only work that is happening docks the line: the chat's own
-    // turn, or an agent its harness still reports as running.
-    if (!source.live && !sessions.some((child) => child.status === 'running')) return null;
+    // Above the composer is how the user knows agents are working right now, so
+    // the line follows the agents alone and never the chat's own turn: it docks
+    // while the newest wave still has one working and leaves when none does. A
+    // finished wave stays in the Subagents panel and the transcript.
+    if (!sessions.some((child) => isWorkingAgentStatus(child.status))) return null;
     return {
       sessions,
       models: source.models,
       ...(source.provider !== undefined ? { provider: source.provider } : {}),
     };
-  }, [source.children, source.live, source.missionControl, source.models, source.provider]);
+  }, [source.children, source.missionControl, source.models, source.provider]);
 }

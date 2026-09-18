@@ -66,6 +66,13 @@ export function isSettledAgentStatus(status: ChildStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
 
+// Work in flight: the agent is running, or it has been spawned and its harness
+// has not reported on it yet. A paused agent is waiting on the user rather than
+// working, and a settled one has stopped.
+export function isWorkingAgentStatus(status: ChildStatus): boolean {
+  return status === 'running' || status === 'pending';
+}
+
 export function buildAgentRows(
   sessions: readonly ChildSessionSummary[],
   models: readonly ModelInfo[],
