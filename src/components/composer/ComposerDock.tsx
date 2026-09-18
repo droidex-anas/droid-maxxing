@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { shallowEqual, useStoreSelector, type AppState } from '../../hooks/useStore';
 import { currentAgentRun, isWorkingAgentStatus } from '../agents/agentMonitorModel';
@@ -16,6 +16,13 @@ export default function ComposerDock() {
   const [open, setOpen] = useState<OpenDock>(null);
   const agents = useDockedAgents();
   const openAgent = useOpenAgent();
+  // Between two waves of one turn the line leaves and returns. It must come back
+  // the way a new line arrives — collapsed — rather than wearing the expansion
+  // the previous wave was given.
+  const docked = agents !== null;
+  useEffect(() => {
+    if (!docked) setOpen((current) => (current === 'agents' ? null : current));
+  }, [docked]);
   // Collapsing only ever closes the line that asked: the plan resets itself on a
   // session switch, and that must not also fold an expanded agents line.
   const showPlan = useCallback((expanded: boolean) => {

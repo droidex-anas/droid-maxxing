@@ -37,10 +37,19 @@ import { SessionRow } from './SidebarSessionRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { prKind } from '../lib/github';
 import { sessionAttention } from '../lib/sessionAttention';
-import type { SessionSummary } from '../types/bridge';
+import type { ChildSessionSummary, SessionSummary } from '../types/bridge';
 import { sessionResumeId } from '../features/providers/providerIdentity';
 import { SidebarAppUpdateButton } from './SidebarAppUpdateButton';
 import { SidebarNavigation } from './SidebarNavigation';
+
+// A chat is working when its own turn runs OR one of its agents does: under
+// ultracode the main agent sleeps while its agents work, and a row that reads as
+// idle then is the thing the mark exists to prevent.
+function hasWorkingAgent(children: Record<string, ChildSessionSummary> | undefined): boolean {
+  return (
+    children !== undefined && Object.values(children).some((child) => child.status === 'running')
+  );
+}
 
 export default function Sidebar({
   workspaceScopes,
@@ -62,6 +71,7 @@ export default function Sidebar({
       sessionLastSeen: current.sessionLastSeen,
       sessionOrder: current.sessionOrder,
       sessions: current.sessions,
+      childSessions: current.childSessions,
     }),
     shallowEqual,
   );
@@ -250,7 +260,7 @@ export default function Sidebar({
         title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
         active={state.activeAppSessionId === m.appSessionId}
         unread={isUnread(m)}
-        running={sessionIsLive(m)}
+        running={sessionIsLive(m) || hasWorkingAgent(state.childSessions[m.appSessionId])}
         activityStatus={status}
         detail={inbox ? reasonFor(m, status) || ACTIVITY_LABELS[status] : undefined}
         // The PR view already names the PR in its group header.

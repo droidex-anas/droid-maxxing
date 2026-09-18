@@ -66,11 +66,13 @@ export function isSettledAgentStatus(status: ChildStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
 
-// Work in flight: the agent is running, or it has been spawned and its harness
-// has not reported on it yet. A paused agent is waiting on the user rather than
-// working, and a settled one has stopped.
+// Work actually in flight, as the harness reports it. `pending` is deliberately
+// not work: it is a child that was registered and never reported on, a state
+// Codex mints for an agent before it initialises and that a restart restores
+// unchanged, so nothing in the app can ever move it. Treating it as work would
+// pin anything keyed on this open for the life of the session.
 export function isWorkingAgentStatus(status: ChildStatus): boolean {
-  return status === 'running' || status === 'pending';
+  return status === 'running';
 }
 
 export function buildAgentRows(
