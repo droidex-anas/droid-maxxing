@@ -71,7 +71,11 @@ test('areSessionRowPropsEqual ignores unrelated session updates', () => {
 
 test('areSessionRowPropsEqual detects row-visible session updates', () => {
   const base = makeProps({ ...STABLE });
-  const changes: Partial<SessionSummary>[] = [{ appSessionId: 'sess-b' }, { updatedAt: 2_000 }];
+  const changes: Partial<SessionSummary>[] = [
+    { appSessionId: 'sess-b' },
+    { updatedAt: 2_000 },
+    { reasoningEffort: 'ultra' },
+  ];
 
   for (const change of changes) {
     const next = makeProps({ session: makeSession(change), ...STABLE });
@@ -180,6 +184,26 @@ test('SessionRow: a running row shows the spinner alongside the timestamp', () =
     /w-3 h-3 rounded-full border-\[1\.5px\] border-droid-text border-r-transparent/,
   );
   assert.match(html, />now</);
+});
+
+test('SessionRow: an ultracode session spins in the ultra colour with the effort shimmer', () => {
+  // Its main agent can idle while its agents work, so the mark has to say more
+  // than "running" — and it must say so in the harness's own word, not colour alone.
+  const html = render(
+    makeProps({
+      running: true,
+      session: makeSession({ provider: 'claude', reasoningEffort: 'ultra' }),
+    }),
+  );
+  assert.match(html, /text-droid-ultra border-current/);
+  assert.match(html, /effort-dot-ultra/);
+  assert.match(html, /aria-label="working on ultracode"/);
+
+  const high = render(
+    makeProps({ running: true, session: makeSession({ reasoningEffort: 'high' }) }),
+  );
+  assert.doesNotMatch(high, /droid-ultra/);
+  assert.match(high, /aria-label="working"/);
 });
 
 test('SessionRow: attention replaces both the working spinner and timestamp', () => {

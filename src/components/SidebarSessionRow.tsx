@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
+import { reasoningEffortLabel } from '../lib/reasoningEffort';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
 import type { SessionAttentionKind } from '../lib/sessionAttention';
@@ -72,6 +73,7 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.attention === next.attention &&
     prev.activityStatus === next.activityStatus &&
     prev.detail === next.detail &&
+    prev.session.reasoningEffort === next.session.reasoningEffort &&
     prev.pr?.kind === next.pr?.kind &&
     prev.pr?.checks === next.pr?.checks &&
     prev.renaming === next.renaming &&
@@ -122,6 +124,11 @@ export const SessionRow = memo(function SessionRow({
   const side = detail ? 'h-5' : '';
   // Droid is the default runtime, so only the other providers are marked.
   const providerMark = session.provider === 'droid' ? null : PROVIDER_MARKS[session.provider];
+  const working = running && !attention;
+  // On the top level the main agent can sit idle while its agents work, so a
+  // working chat must read as more than "running". Same purple and shimmer the
+  // effort control gives the level, in the harness's own word.
+  const ultra = working && session.reasoningEffort === 'ultra';
 
   // Return focus to the row when the inline editor closes, unless the user
   // already moved focus elsewhere (e.g. clicked another row).
@@ -214,13 +221,19 @@ export const SessionRow = memo(function SessionRow({
           active ? 'bg-droid-active' : 'hover:bg-droid-elevated/40'
         }`}
       >
+        {/* The shimmer sits on the slot, not the spinner: both are `animation`
+            shorthands and would otherwise overwrite each other. */}
         <span
-          className={`flex shrink-0 items-center justify-center ${inbox ? 'w-3.5' : 'w-3'} ${side} ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
+          className={`flex shrink-0 items-center justify-center ${inbox ? 'w-3.5' : 'w-3'} ${side} ${ultra ? 'effort-dot-ultra ' : ''}${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
-          {running && !attention ? (
+          {working ? (
             <span
-              className="w-3 h-3 rounded-full border-[1.5px] border-droid-text border-r-transparent motion-safe:animate-spin-slow"
-              aria-label="working"
+              // The ultra ring borrows the existing text token rather than a
+              // border one: the initial CSS sits a few bytes under its budget.
+              className={`w-3 h-3 rounded-full border-[1.5px] ${ultra ? 'text-droid-ultra border-current' : 'border-droid-text'} border-r-transparent motion-safe:animate-spin-slow`}
+              aria-label={
+                ultra ? `working on ${reasoningEffortLabel('ultra', session.provider)}` : 'working'
+              }
             />
           ) : inbox ? (
             <ActivityStatusGlyph
@@ -308,7 +321,7 @@ export const SessionRow = memo(function SessionRow({
       </button>
       {/* In the inbox the status mark becomes the settle control on hover: one
           click closes a task without the menu; on a settled row it reopens. */}
-      {onToggleSettled && !(running && !attention) && (
+      {onToggleSettled && !working && (
         <button
           type="button"
           aria-label={settled ? `Reopen ${title}` : `Mark ${title} as settled`}
