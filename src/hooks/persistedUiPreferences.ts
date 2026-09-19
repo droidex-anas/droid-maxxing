@@ -94,7 +94,7 @@ const SESSION_LAST_SEEN_STORAGE_KEY = 'droid-session-last-seen-v1';
 const SHORTCUTS_STORAGE_KEY = 'droid-shortcuts-v1';
 const UI_STATE_STORAGE_KEY = 'droid-ui-state-v2';
 
-export type MainView = 'session' | 'pull-requests' | 'automations';
+export type MainView = 'session' | 'pull-requests' | 'automations' | 'projects';
 
 interface PersistedUiState {
   activeAppSessionId: string | null;
@@ -257,7 +257,8 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       mainView:
         parsed.mainView === 'session' ||
         parsed.mainView === 'pull-requests' ||
-        parsed.mainView === 'automations'
+        parsed.mainView === 'automations' ||
+        parsed.mainView === 'projects'
           ? parsed.mainView
           : undefined,
     };

@@ -1,3 +1,4 @@
+import { isProjectView, isProjectResult } from '../features/projects/validation';
 import type {
   BridgeResetMessage,
   BridgeRuntimeSnapshot,
@@ -139,6 +140,14 @@ function isServerEvent(value: unknown): value is ServerEvent {
   // Runtime `type` is a string; narrowing to the union makes a missing variant fail this switch.
   const type = value.type as ServerEvent['type'];
   switch (type) {
+    case 'projects.snapshot':
+      return (
+        Array.isArray(value.projects) &&
+        value.projects.length <= 32 &&
+        value.projects.every(isProjectView)
+      );
+    case 'project.result':
+      return isProjectResult(value);
     case 'connection':
       return value.status === 'connected' || value.status === 'error';
     case 'runtime.updated':

@@ -58,6 +58,25 @@ flowchart LR
 - `SessionLifecycle` owns primary-session create, resume, lazy resume, send queueing, steering, interruption, and ordered cleanup. Parent close calls one semantic `ChildSessions.closeParent()` operation rather than maintaining another child map.
 - Workspace sessions pass their selected folder to Factory unchanged. Folder-less sessions remain `workspaceKind: none` in navigation, while their Factory runtime uses the app-owned `chats/` directory under `DROIDEX_USER_DATA_DIR`; DROIDEX creates it before opening the session and never uses the user's home directory as an implicit workspace.
 
+### Local Projects
+
+`projects/ProjectService` owns membership and bounded task reports over ordinary
+sessions. `ProjectWakeQueue` owns wake admission and a two-turn concurrency
+limit; it reuses the scheduled-delivery receipt rather than inventing another
+runtime queue. The session bridge binds membership durably before the first
+goal can execute. `SessionLifecycle` remains the sole runtime owner.
+
+A settled primary reply produces one bounded report to its direct owner.
+Thinking and tool output are never forwarded. Busy recipients wait for session
+availability or capacity events. Interrupted delivery is retained as uncertain
+and requires review, rather than being silently replayed. Native permission
+requests and user questions stay with the human.
+
+The Projects route owns its snapshot outside the streaming chat store and
+opens conversations through the normal chat/composer. This draft exposes app
+controls, not an agent-native tool transport. No Projects MCP server is added.
+See [Projects](projects.md) for current capabilities and limitations.
+
 ### Child runtime residency
 
 - Every live child runtime is a provider operating-system process. One measures roughly 350 MiB resident while doing nothing, so the four concurrently live child runtimes the budget allows are the largest single memory cost in the application.

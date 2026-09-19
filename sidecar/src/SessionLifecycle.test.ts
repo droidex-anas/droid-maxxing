@@ -78,7 +78,10 @@ class RejectingCloseSession extends FakeFactorySession {
   }
 }
 
-function createHarness(ordinarySummaries: SessionSummary[] = []) {
+function createHarness(
+  ordinarySummaries: SessionSummary[] = [],
+  beforeFirstTurn?: (session: SessionSummary, clientRef: string) => Promise<void>,
+) {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
   const publicationRegistration: boolean[] = [];
@@ -134,6 +137,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     interactionMode: 'auto',
   };
   const lifecycle = new SessionLifecycle({
+    beforeFirstTurn,
     eventFlow: { apply: () => undefined },
     provider: () => new DroidProvider(runtime),
     registry,
@@ -1576,5 +1580,51 @@ test('closing a scheduled target during cold resume invalidates its provisional 
   assert.deepEqual(provider.prompts, []);
   assert.ok(
     harness.calls.some((call) => call.method === 'session.close' && call.args[0] === 'cold-close'),
+  );
+});
+
+test('dependent ownership is committed before the first provider turn', async () => {
+  let release = () => {};
+  let entered = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const binding = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const h = createHarness([], async (session, clientRef) => {
+    assert.equal(session.appSessionId, 'bound');
+    assert.equal(clientRef, 'client-1');
+    entered();
+    await gate;
+  });
+  const provider = queueCreate(h, 'bound');
+  const creating = h.lifecycle.create(createCommand());
+  await binding;
+  assert.equal(
+    h.calls.some((call) => call.method === 'stream'),
+    false,
+  );
+  release();
+  await creating;
+  await provider.waitForPrompts(1);
+  await h.lifecycle.closeAll();
+});
+
+test('a failed ownership commit releases the session without executing its goal', async () => {
+  const h = createHarness([], async () => {
+    throw new Error('Project ledger is full');
+  });
+  queueCreate(h, 'failed-bind');
+  await h.lifecycle.create(createCommand());
+  assert.equal(
+    h.calls.some((call) => call.method === 'stream'),
+    false,
+  );
+  assert.equal(h.registry.getLive('failed-bind'), undefined);
+  assert.ok(
+    h.events.some(
+      (event) => event.type === 'error' && event.message.includes('Project ledger is full'),
+    ),
   );
 });

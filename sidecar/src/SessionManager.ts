@@ -183,6 +183,7 @@ export interface SessionManagerDependencies {
 }
 
 export interface SessionManagerOptions {
+  beforeFirstTurn?: ((session: SessionSummary, clientRef: string) => Promise<void>) | undefined;
   assetUrlFor?: (path: string) => string;
   onSessionAvailable?: (appSessionId: string) => void;
   onScheduledCapacityChanged?: () => void;
@@ -558,6 +559,7 @@ export class SessionManager {
       },
     });
     this.lifecycle = new SessionLifecycle({
+      beforeFirstTurn: options.beforeFirstTurn,
       provider: (kind) => this.providerFor(kind),
       providerDefaultModelId: (kind) => this.providerProbes.status(kind)?.defaultModelId,
       registry: this.registry,
@@ -1033,6 +1035,10 @@ export class SessionManager {
       reasoningEffort: resolveAutomationReasoningEffort(summary, modelId, defaultReasoning, models),
       autonomy: summary.autonomy,
     };
+  }
+
+  sessionSummary(appSessionId: string): SessionSummary | undefined {
+    return this.registry.resolveSummary(appSessionId);
   }
 
   async validateAutomationSelection(

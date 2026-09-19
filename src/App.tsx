@@ -78,6 +78,7 @@ import {
 } from './components/skeletons/WorkspaceSkeletons';
 import {
   LazyAutomationsRoute,
+  LazyProjectsRoute,
   LazyBrowserFocusWorkspace,
   LazyCommandPalette,
   LazyAgentsWorkspace,
@@ -160,7 +161,9 @@ export default function App() {
   const embedded = isEmbedded();
   useEffect(() => {
     if (!embedded) return;
-    if (state.mainView === 'automations') {
+    if (state.mainView === 'projects') {
+      dispatch({ type: 'CLOSE_PROJECTS' });
+    } else if (state.mainView === 'automations') {
       dispatch({ type: 'CLOSE_AUTOMATIONS' });
     } else if (state.mainView === 'pull-requests') {
       dispatch({ type: 'CLOSE_PULL_REQUESTS' });
@@ -210,7 +213,10 @@ export default function App() {
   // of them instead of covering their header. The pane's open state survives
   // the visit and it comes back with the chat.
   const fullContentRoute =
-    !embedded && (state.mainView === 'pull-requests' || state.mainView === 'automations');
+    !embedded &&
+    (state.mainView === 'pull-requests' ||
+      state.mainView === 'automations' ||
+      state.mainView === 'projects');
   const showUtilityPane =
     !embedded && !!activeSession && utilityPanel.open && !showWizard && !fullContentRoute;
   // An expanded browser or agent covers the full content row; the utility pane
@@ -683,7 +689,11 @@ export default function App() {
                 paneExpanded ? 'pointer-events-none' : ''
               }`}
             >
-              {!embedded && state.mainView === 'pull-requests' ? (
+              {!embedded && state.mainView === 'projects' ? (
+                <Suspense fallback={<PanelSkeleton title="projects" />}>
+                  <LazyProjectsRoute />
+                </Suspense>
+              ) : !embedded && state.mainView === 'pull-requests' ? (
                 <Suspense fallback={<PullRequestsSkeleton />}>
                   <LazyPullRequestsView />
                 </Suspense>

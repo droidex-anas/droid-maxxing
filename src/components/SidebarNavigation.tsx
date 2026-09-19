@@ -4,7 +4,7 @@ import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { isEmbedded } from '../lib/embed';
 import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { GitPullRequestIcon } from './environment/GithubIcons';
-import { Clock } from '@droidex/icons';
+import { Clock, MessageCirclePlus } from '@droidex/icons';
 
 export function SidebarNavigation() {
   const dispatch = useStoreDispatch();
@@ -54,6 +54,15 @@ export function SidebarNavigation() {
           <GitPullRequestIcon size={15} />
         </span>
         Pull requests
+      </button>
+      <button
+        data-testid="projects-nav"
+        aria-current={state.mainView === 'projects' ? 'page' : undefined}
+        onClick={() => dispatch({ type: 'OPEN_PROJECTS' })}
+        className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${state.mainView === 'projects' ? 'bg-droid-active text-droid-text' : 'text-droid-text hover:bg-droid-elevated'}`}
+      >
+        <MessageCirclePlus className="h-3.5 w-3.5 shrink-0 text-droid-text-secondary" />
+        Projects
       </button>
       <button
         ref={automationsButtonRef}
