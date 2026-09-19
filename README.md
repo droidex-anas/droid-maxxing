@@ -2,8 +2,9 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-DROIDEX is a macOS desktop workspace for Factory Droid. It keeps chats,
-projects, terminals, browser sessions, and agent work together in one app.
+DROIDEX is a macOS desktop workspace for coding agents, including Factory
+Droid, Claude Code, and Codex. It keeps chats, projects, terminals, browser
+sessions, and agent work together in one app.
 
 Website: [droidex.vercel.app](https://droidex.vercel.app)
 
@@ -33,8 +34,8 @@ Found a security problem? Do not open an issue. Follow
 
 ## Run it locally
 
-You need Node.js 22, npm, and the Factory Droid CLI. DROIDEX can install the
-CLI during onboarding if it is not already available.
+You need Node.js 22, npm, and at least one supported agent CLI. DROIDEX can
+install the Factory Droid CLI during onboarding if it is not already available.
 
 Install dependencies and launch the desktop app:
 
